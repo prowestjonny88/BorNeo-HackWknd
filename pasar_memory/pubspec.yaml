@@ -1,0 +1,38 @@
+name: pasar_memory
+description: "A new Flutter project."
+publish_to: 'none' 
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod:
+  go_router:
+  sqflite:
+  path:
+  dio:
+  freezed_annotation:
+  json_annotation:
+  image_picker:
+  file_picker:
+  share_plus:
+  google_mlkit_text_recognition:
+  record:
+  supabase_flutter:
+  intl:
+  uuid:
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  freezed:
+  json_serializable:
+  build_runner:
+
+flutter:
+  uses-material-design: true
