@@ -26,6 +26,7 @@ dependencies:
   share_plus:
   google_mlkit_text_recognition:
   record:
+  speech_to_text: ^7.0.0
   supabase_flutter:
   intl:
   uuid:

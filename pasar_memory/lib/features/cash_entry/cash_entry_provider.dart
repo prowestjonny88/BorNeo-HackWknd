@@ -92,6 +92,16 @@ class CashEntryController extends Notifier<CashEntryState> {
     );
   }
 
+  void confirmAmount(double amount) {
+    final fixed = amount.toStringAsFixed(2);
+    state = state.copyWith(
+      amountText: fixed,
+      amount: amount,
+      isConfirmed: true,
+      bannerMessage: amount > 0 ? 'Cash confirmed' : 'No cash counted for this session',
+    );
+  }
+
   void reset() {
     state = const CashEntryState();
   }

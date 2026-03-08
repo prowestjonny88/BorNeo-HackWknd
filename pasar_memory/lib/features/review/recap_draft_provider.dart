@@ -145,7 +145,8 @@ class RecapDraftController extends Notifier<RecapDraftState> {
   }
 
   double? _extractCashAmount(String transcript) {
-    final regex = RegExp(r'(?:rm\s*)?(\d+(?:\.\d{1,2})?)', caseSensitive: false);
+    // Only extract amounts explicitly marked with RM prefix — avoids picking up item quantities
+    final regex = RegExp(r'rm\s*(\d+(?:\.\d{1,2})?)', caseSensitive: false);
     final matches = regex.allMatches(transcript);
     if (matches.isEmpty) return null;
     final last = matches.last.group(1);

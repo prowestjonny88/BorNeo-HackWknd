@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'voice_provider.dart';
+import '../cash_entry/cash_entry_provider.dart';
 import '../review/recap_draft_provider.dart';
+import '../review/recap_review_provider.dart';
+import '../selling/selling_provider.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
 import '../../shared/widgets/progress_stepper.dart';
@@ -18,43 +22,50 @@ class VoiceRecapScreen extends ConsumerStatefulWidget {
 
 class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
   late final TextEditingController _transcriptController;
-  late final ProviderSubscription<RecapDraftState> _recapSubscription;
 
   @override
   void initState() {
     super.initState();
-    final initialState = ref.read(recapDraftProvider);
-    _transcriptController = TextEditingController(text: initialState.transcript);
-    _recapSubscription = ref.listenManual<RecapDraftState>(recapDraftProvider, (prev, next) {
-      if (next.transcript != _transcriptController.text) {
-        _transcriptController.value = _transcriptController.value.copyWith(
-          text: next.transcript,
-          selection: TextSelection.collapsed(offset: next.transcript.length),
-        );
-      }
-
-      final prevError = prev?.errorMessage;
-      final nextError = next.errorMessage;
-      if (nextError != null && nextError != prevError) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(content: Text(nextError)));
-      }
-    });
+    _transcriptController = TextEditingController();
   }
 
   @override
   void dispose() {
-    _recapSubscription.close();
     _transcriptController.dispose();
     super.dispose();
   }
 
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final recap = ref.watch(recapDraftProvider);
+    final voiceState = ref.watch(voiceProvider);
+    final voiceController = ref.read(voiceProvider.notifier);
     final recapController = ref.read(recapDraftProvider.notifier);
     final textTheme = Theme.of(context).textTheme;
+
+    // Sync transcript controller with finalized voice state
+    final displayText = voiceState.transcript ?? '';
+    if (displayText != _transcriptController.text && !voiceState.isRecording) {
+      _transcriptController.text = displayText;
+    }
+
+    // Show error snackbar
+    ref.listen<VoiceState>(voiceProvider, (prev, next) {
+      if (next.errorMessage != null && next.errorMessage != prev?.errorMessage) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text(next.errorMessage!),
+            backgroundColor: AppTheme.coral,
+          ));
+      }
+    });
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -109,39 +120,66 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                             height: 72,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: AppTheme.amber.withValues(alpha: 0.12),
+                              color: voiceState.isRecording 
+                                ? AppTheme.coral.withValues(alpha: 0.2)
+                                : AppTheme.amber.withValues(alpha: 0.12),
                               boxShadow: [
                                 BoxShadow(
-                                  color: AppTheme.amber.withValues(alpha: 0.35),
+                                  color: voiceState.isRecording
+                                    ? AppTheme.coral.withValues(alpha: 0.5)
+                                    : AppTheme.amber.withValues(alpha: 0.35),
                                   blurRadius: 24,
                                 ),
                               ],
                             ),
-                            child: const Icon(Icons.mic_none_rounded, color: AppTheme.amber, size: 40),
+                            child: Icon(
+                              voiceState.isRecording ? Icons.mic : Icons.mic_none_rounded, 
+                              color: voiceState.isRecording ? AppTheme.coral : AppTheme.amber, 
+                              size: 40,
+                            ),
                           ),
                           const SizedBox(height: 28),
-                          const VoiceWaveform(isRecording: true),
+                          VoiceWaveform(
+                            isRecording: voiceState.isRecording,
+                          ),
                           const SizedBox(height: 28),
-                          Text('00:24', style: AppTheme.mono(size: 32, color: AppTheme.amber)),
+                          Text(
+                            _formatDuration(voiceState.recordingDuration), 
+                            style: AppTheme.mono(size: 32, color: AppTheme.amber),
+                          ),
                           const SizedBox(height: 8),
                           Text(
-                              recap.isTranscriptConfirmed ? 'Recap captured and ready to review' : 'Draft your recap naturally',
+                            _getStatusText(voiceState),
                             style: textTheme.bodyMedium?.copyWith(
                               color: AppTheme.softWhite.withValues(alpha: 0.7),
                             ),
                           ),
                           const SizedBox(height: 26),
-                          Container(
-                            width: 80,
-                            height: 80,
-                            decoration: BoxDecoration(
-                              color: recap.isTranscriptConfirmed ? AppTheme.jade : AppTheme.coral,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              recap.isTranscriptConfirmed ? Icons.check_rounded : Icons.mic_rounded,
-                              color: Colors.white,
-                              size: 34,
+                          // Main recording/action button
+                          GestureDetector(
+                            onTap: voiceState.isProcessing 
+                              ? null 
+                              : () => _handleMainButtonTap(voiceState, voiceController),
+                            child: Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                color: _getMainButtonColor(voiceState),
+                                shape: BoxShape.circle,
+                              ),
+                              child: voiceState.isProcessing
+                                ? const Padding(
+                                    padding: EdgeInsets.all(24),
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 3,
+                                    ),
+                                  )
+                                : Icon(
+                                    _getMainButtonIcon(voiceState),
+                                    color: Colors.white,
+                                    size: 34,
+                                  ),
                             ),
                           ),
                         ],
@@ -165,7 +203,8 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                               children: const [
                                 _PromptChip(label: 'Items sold?'),
                                 _PromptChip(label: 'Any sold out?'),
-                                _PromptChip(label: 'Cash or QR?'),
+                                _PromptChip(label: 'Cash counted?'),
+                                _PromptChip(label: 'How many bihun?'),
                               ],
                             ),
                           ],
@@ -173,57 +212,155 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'TRANSCRIPT',
-                              style: textTheme.labelMedium?.copyWith(color: AppTheme.amber),
-                            ),
-                            const SizedBox(height: 10),
-                            TextField(
-                              controller: _transcriptController,
-                              minLines: 5,
-                              maxLines: 7,
-                              onChanged: recapController.setTranscript,
-                              decoration: const InputDecoration(
-                                hintText: 'Example: Sold 12 bihun, 9 mee goreng, cash around RM 180.',
+                    // Live partial transcript shown while recording
+                    if (voiceState.isRecording && voiceState.partialTranscript != null && voiceState.partialTranscript!.isNotEmpty)
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.hearing_rounded, color: AppTheme.coral, size: 16),
+                                  const SizedBox(width: 6),
+                                  Text('Listening...', style: textTheme.labelMedium?.copyWith(color: AppTheme.coral)),
+                                ],
                               ),
-                              style: textTheme.bodyLarge,
-                            ),
-                            const SizedBox(height: 8),
-                            if (recap.cashSuggestion != null)
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  'Detected possible cash amount: RM ${recap.cashSuggestion!.toStringAsFixed(2)}',
-                                  style: textTheme.bodyMedium?.copyWith(
-                                    color: AppTheme.jade,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                              const SizedBox(height: 8),
+                              Text(
+                                voiceState.partialTranscript!,
+                                style: textTheme.bodyMedium?.copyWith(
+                                  color: AppTheme.softWhite.withValues(alpha: 0.7),
+                                  fontStyle: FontStyle.italic,
                                 ),
-                            ),
-                          ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                    // Transcript section - shows after recording done
+                    if (!voiceState.isRecording && (voiceState.transcript?.isNotEmpty == true || voiceState.isProcessing))
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    'TRANSCRIPT',
+                                    style: textTheme.labelMedium?.copyWith(color: AppTheme.amber),
+                                  ),
+                                  const Spacer(),
+                                  if (voiceState.transcript?.isNotEmpty == true)
+                                    TextButton.icon(
+                                      onPressed: voiceController.reparseTranscript,
+                                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                                      label: const Text('Re-parse'),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              TextField(
+                                controller: _transcriptController,
+                                minLines: 4,
+                                maxLines: 7,
+                                onChanged: voiceController.setTranscript,
+                                decoration: InputDecoration(
+                                  hintText: voiceState.isProcessing
+                                    ? 'Analyzing your recap...'
+                                    : 'Your transcript will appear here after recording',
+                                ),
+                                style: textTheme.bodyLarge,
+                                enabled: !voiceState.isProcessing,
+                              ),
+                              const SizedBox(height: 8),
+                              // Show parsed cash if detected
+                              if (voiceState.parsedRecap?.cashMention != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.jade.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.payments_outlined, color: AppTheme.jade, size: 18),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Detected cash: RM ${voiceState.parsedRecap!.cashMention!.amount.toStringAsFixed(2)}',
+                                        style: textTheme.bodyMedium?.copyWith(
+                                          color: AppTheme.jade,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      if (voiceState.parsedRecap!.cashMention!.isApproximate)
+                                        Text(
+                                          ' (approximate)',
+                                          style: textTheme.bodySmall?.copyWith(
+                                            color: AppTheme.jade.withValues(alpha: 0.7),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              // Show parsed items count
+                              if (voiceState.parsedRecap != null && voiceState.parsedRecap!.items.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    '${voiceState.parsedRecap!.items.length} menu item(s) detected',
+                                    style: textTheme.bodySmall?.copyWith(
+                                      color: AppTheme.amber,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 20),
-                    FilledButton(
-                      onPressed: () {
-                        final ok = recapController.confirmTranscript();
-                        if (!ok) return;
-                        context.go('/cash');
-                      },
-                      child: const Text('Confirm Recap ->'),
-                    ),
+                                    // Continue button
+                    if (voiceState.isDone || voiceState.transcript?.isNotEmpty == true)
+                      FilledButton(
+                        onPressed: () async {
+                          if (voiceState.parsedRecap?.cashMention != null) {
+                            ref.read(spokenCashAmountProvider.notifier).set(
+                              voiceState.parsedRecap!.cashMention!.amount,
+                            );
+                          } else if (voiceState.parsedRecap != null &&
+                              voiceState.parsedRecap!.items.isNotEmpty) {
+                            // Auto-estimate cash from items × price when no cash keyword spoken
+                            final menuItems = ref.read(sellingProvider).menuItems;
+                            final prices = {for (final m in menuItems) m.id: m.price};
+                            final estimated = voiceState.parsedRecap!.estimatedTotal(prices);
+                            if (estimated > 0) {
+                              ref.read(spokenCashAmountProvider.notifier).set(estimated);
+                            }
+                          }
+                          if (voiceState.transcript != null) {
+                            recapController.setTranscript(voiceState.transcript!);
+                            recapController.confirmTranscript();
+                          }
+                          context.go('/review');
+                        },
+                        child: const Text('Review Recap ->'),
+                      ),
                     const SizedBox(height: 12),
-                    OutlinedButton(
-                      onPressed: recapController.resetTranscript,
-                      child: const Text('Re-record'),
-                    ),
+                    if (voiceState.transcript?.isNotEmpty == true)
+                      OutlinedButton(
+                        onPressed: () {
+                          voiceController.reset();
+                          _transcriptController.clear();
+                          ref.read(sellingProvider.notifier).resetAll();
+                          ref.read(recapDraftProvider.notifier).resetTranscript();
+                          ref.read(cashEntryProvider.notifier).reset();
+                          ref.read(recapReviewProvider.notifier).reset();
+                        },
+                        child: const Text('Start Over'),
+                      ),
                     const SizedBox(height: 88),
                   ],
                 ),
@@ -234,6 +371,78 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
         ),
       ),
     );
+  }
+
+  String _getStatusText(VoiceState state) {
+    switch (state.recordingState) {
+      case VoiceRecordingState.idle:
+        return 'Tap to start recording';
+      case VoiceRecordingState.recording:
+        return 'Listening... tap to stop & process';
+      case VoiceRecordingState.recorded:
+        return 'Tap to process';
+      case VoiceRecordingState.transcribing:
+        return 'Transcribing your voice...';
+      case VoiceRecordingState.parsing:
+        return 'Analyzing your recap...';
+      case VoiceRecordingState.done:
+        return 'Recap ready for review!';
+      case VoiceRecordingState.error:
+        return 'Something went wrong';
+    }
+  }
+
+  Color _getMainButtonColor(VoiceState state) {
+    switch (state.recordingState) {
+      case VoiceRecordingState.recording:
+        return AppTheme.coral;
+      case VoiceRecordingState.done:
+        return AppTheme.jade;
+      case VoiceRecordingState.error:
+        return AppTheme.coral.withValues(alpha: 0.5);
+      default:
+        return AppTheme.amber;
+    }
+  }
+
+  IconData _getMainButtonIcon(VoiceState state) {
+    switch (state.recordingState) {
+      case VoiceRecordingState.idle:
+        return Icons.mic_rounded;
+      case VoiceRecordingState.recording:
+        return Icons.stop_rounded;
+      case VoiceRecordingState.recorded:
+        return Icons.play_arrow_rounded;
+      case VoiceRecordingState.done:
+        return Icons.check_rounded;
+      case VoiceRecordingState.error:
+        return Icons.refresh_rounded;
+      default:
+        return Icons.mic_rounded;
+    }
+  }
+
+  void _handleMainButtonTap(VoiceState state, VoiceController controller) {
+    switch (state.recordingState) {
+      case VoiceRecordingState.idle:
+        controller.startRecording();
+        break;
+      case VoiceRecordingState.recording:
+        // Stop and immediately parse in one tap
+        controller.stopAndProcess();
+        break;
+      case VoiceRecordingState.recorded:
+        controller.processRecording();
+        break;
+      case VoiceRecordingState.error:
+        controller.reset();
+        break;
+      case VoiceRecordingState.done:
+        // Already done, button should navigate
+        break;
+      default:
+        break;
+    }
   }
 }
 
