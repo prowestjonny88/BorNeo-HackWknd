@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../data/repositories/repository_providers.dart';
 import '../auth/session_provider.dart';
@@ -266,10 +268,6 @@ class EvidenceController extends Notifier<EvidenceState> {
     state = state.copyWith(statusById: nextStatus, clearWarning: true);
 
     try {
-      // Placeholder OCR/parsing hook: Dev 3 will implement.
-      // For now, simulate fast completion with empty results.
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-
       // Persist raw evidence metadata (type + path) for the day.
       final evidenceRepo = ref.read(evidenceRepositoryProvider);
       final accountId = ref.read(sessionProvider).accountKey;
@@ -280,8 +278,11 @@ class EvidenceController extends Notifier<EvidenceState> {
       };
       await evidenceRepo.saveEvidence(type, file.path ?? file.name, accountId: accountId);
 
+      // Real OCR: extract payment amounts from the uploaded image
+      final amounts = await _extractAmountsFromFile(file);
+
       final nextResult = Map<String, EvidenceFileResult>.from(state.resultById);
-      nextResult[id] = const EvidenceFileResult(amounts: <ExtractedAmount>[]);
+      nextResult[id] = EvidenceFileResult(amounts: amounts);
 
       final doneStatus = Map<String, EvidenceProcessingStatus>.from(state.statusById);
       doneStatus[id] = EvidenceProcessingStatus.done;
@@ -331,6 +332,69 @@ class EvidenceController extends Notifier<EvidenceState> {
     final nextResult = Map<String, EvidenceFileResult>.from(state.resultById);
     nextResult[fileId] = EvidenceFileResult(amounts: nextAmounts, errorMessage: current.errorMessage);
     state = state.copyWith(resultById: nextResult);
+  }
+
+  // ── OCR helpers ────────────────────────────────────────────────────────────
+
+  Future<List<ExtractedAmount>> _extractAmountsFromFile(EvidenceIngestedFile file) async {
+    if (kIsWeb) return const <ExtractedAmount>[];
+
+    final path = file.path;
+    if (path == null || path.trim().isEmpty) return const <ExtractedAmount>[];
+
+    try {
+      final inputImage = InputImage.fromFilePath(path);
+      final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+      final recognized = await recognizer.processImage(inputImage);
+      await recognizer.close();
+      return _parseAmountsFromText(recognized.text);
+    } catch (_) {
+      return const <ExtractedAmount>[];
+    }
+  }
+
+  List<ExtractedAmount> _parseAmountsFromText(String rawText) {
+    const uuid = Uuid();
+    final text = rawText.replaceAll('\n', ' ');
+
+    // Priority 1: amounts adjacent to payment keywords
+    final contextPattern = RegExp(
+      r'(?:total|jumlah|amount|bayaran|payment|received|dibayar|transfer|charged|tolak)'
+      r'\s*[:\-]?\s*(?:RM|MYR)?\s*(\d{1,6}(?:[.,]\d{1,2})?)',
+      caseSensitive: false,
+    );
+    // Priority 2: RM / MYR prefixed values
+    final rmPattern = RegExp(
+      r'(?:RM|MYR)\s*(\d{1,6}(?:[.,]\d{1,2})?)',
+      caseSensitive: false,
+    );
+
+    final found = <double, String>{};
+
+    for (final m in contextPattern.allMatches(text)) {
+      final raw = (m.group(1) ?? '').replaceAll(',', '.');
+      final v = double.tryParse(raw);
+      if (v != null && v >= 0.10) found[v] = 'Total amount';
+    }
+    for (final m in rmPattern.allMatches(text)) {
+      final raw = (m.group(1) ?? '').replaceAll(',', '.');
+      final v = double.tryParse(raw);
+      if (v != null && v >= 0.10 && !found.containsKey(v)) {
+        found[v] = 'Payment detected';
+      }
+    }
+
+    // Sort largest-first (the overall total is usually the biggest number)
+    final entries = found.entries.toList()..sort((a, b) => b.key.compareTo(a.key));
+    final result = <ExtractedAmount>[];
+    for (var i = 0; i < entries.length && i < 5; i++) {
+      result.add(ExtractedAmount(
+        id: uuid.v4(),
+        amount: entries[i].key,
+        trustLabel: entries[i].value,
+      ));
+    }
+    return result;
   }
 }
 

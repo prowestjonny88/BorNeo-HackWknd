@@ -41,9 +41,11 @@ void main() {
     await container.read(sessionProvider.notifier).register(
           displayName: 'Kak Lina',
           phoneOrEmail: 'kaklina@example.com',
+          password: 'password123',
           businessName: 'Gerai Kak Lina',
           businessType: 'Hawker / Noodles',
           preferredLanguage: 'English',
+          email: 'kaklina@example.com',
         );
 
     final session = container.read(sessionProvider);

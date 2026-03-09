@@ -29,6 +29,7 @@ dependencies:
   supabase_flutter:
   intl:
   uuid:
+  speech_to_text:
 
 dev_dependencies:
   flutter_test:

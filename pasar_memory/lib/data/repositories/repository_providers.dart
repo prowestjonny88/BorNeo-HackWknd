@@ -7,6 +7,7 @@ import 'extraction_repo.dart';
 import 'recap_repo.dart';
 import 'ledger_repo.dart';
 import 'correction_repo.dart';
+import '../remote/supabase_account_service.dart';
 import '../../services/sync/sync_service.dart';
 
 // --- Repositories ---
@@ -18,6 +19,7 @@ final extractionRepositoryProvider = Provider((ref) => ExtractionRepository());
 final recapRepositoryProvider = Provider((ref) => RecapRepository());
 final ledgerRepositoryProvider = Provider((ref) => LedgerRepository());
 final correctionRepositoryProvider = Provider((ref) => CorrectionRepository());
+final supabaseAccountServiceProvider = Provider((ref) => SupabaseAccountService());
 
 // --- Services ---
 final syncServiceProvider = Provider((ref) => SyncService());

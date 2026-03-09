@@ -51,14 +51,11 @@ class DailyLedgerScreen extends ConsumerWidget {
                       style: textTheme.bodyMedium?.copyWith(color: AppTheme.softWhite.withValues(alpha: 0.65)),
                     ),
                     const SizedBox(height: 20),
-                    SizedBox(
-                      height: 200,
-                      child: ReconciliationSummaryWidget(
-                        totalSales: 'RM ${totalSales.toStringAsFixed(2)}',
-                        digitalTotal: 'RM ${digitalTotal.toStringAsFixed(2)}',
-                        cash: 'RM ${cashTotal.toStringAsFixed(2)}',
-                        estimatedItems: '$estimatedItems',
-                      ),
+                    ReconciliationSummaryWidget(
+                      totalSales: 'RM ${totalSales.toStringAsFixed(2)}',
+                      digitalTotal: 'RM ${digitalTotal.toStringAsFixed(2)}',
+                      cash: 'RM ${cashTotal.toStringAsFixed(2)}',
+                      estimatedItems: '$estimatedItems',
                     ),
                     const SizedBox(height: 20),
                     Text('BUILT FROM', style: textTheme.labelMedium?.copyWith(color: AppTheme.amber)),
@@ -66,12 +63,26 @@ class DailyLedgerScreen extends ConsumerWidget {
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
-                        children: const [
-                          _SourceChip(label: 'Screenshot', icon: Icons.photo_camera_outlined),
-                          SizedBox(width: 8),
-                          _SourceChip(label: 'Voice Recap', icon: Icons.mic_none_rounded),
-                          SizedBox(width: 8),
-                          _SourceChip(label: 'Cash Entry', icon: Icons.payments_outlined),
+                        children: [
+                          if (evidenceState.files.isNotEmpty) ...[
+                            _SourceChip(
+                              label: '${evidenceState.files.length} Screenshot${evidenceState.files.length > 1 ? 's' : ''}',
+                              icon: Icons.photo_camera_outlined,
+                              active: digitalTotal > 0,
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          _SourceChip(
+                            label: 'Voice Recap',
+                            icon: Icons.mic_none_rounded,
+                            active: true,
+                          ),
+                          const SizedBox(width: 8),
+                          _SourceChip(
+                            label: cashState.isConfirmed ? 'Cash Confirmed' : 'Cash Entry',
+                            icon: Icons.payments_outlined,
+                            active: cashState.isConfirmed,
+                          ),
                         ],
                       ),
                     ),
@@ -176,26 +187,38 @@ class DailyLedgerScreen extends ConsumerWidget {
 }
 
 class _SourceChip extends StatelessWidget {
-  const _SourceChip({required this.label, required this.icon});
+  const _SourceChip({required this.label, required this.icon, this.active = false});
 
   final String label;
   final IconData icon;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
+    final color = active ? AppTheme.jade : AppTheme.softWhite;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
+        color: active
+            ? AppTheme.jade.withValues(alpha: 0.12)
+            : Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+        border: Border.all(
+          color: active
+              ? AppTheme.jade.withValues(alpha: 0.5)
+              : Colors.white.withValues(alpha: 0.15),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: AppTheme.softWhite),
+          Icon(icon, size: 16, color: color),
           const SizedBox(width: 8),
-          Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.softWhite)),
+          Text(label,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: color)),
         ],
       ),
     );

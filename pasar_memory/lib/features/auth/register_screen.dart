@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/remote/supabase_client.dart';
 import '../../shared/theme/app_theme.dart';
 import 'session_provider.dart';
 
@@ -24,6 +25,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   bool _agreeTerms = false;
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
+  static final RegExp _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
   static const _businessTypes = [
     'Hawker / Noodles',
@@ -173,19 +175,40 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   }
 
   Future<void> _submit() async {
-    if (_nameController.text.trim().isEmpty ||
-        _phoneController.text.trim().isEmpty ||
-        _passwordController.text.isEmpty ||
-        _confirmController.text.isEmpty ||
-        _businessNameController.text.trim().isEmpty ||
-        (_businessType == null || _businessType!.isEmpty) ||
+    final usesCloudSync = SupabaseClientProvider.isConfigured;
+    final name = _nameController.text.trim();
+    final phone = _phoneController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final confirm = _confirmController.text;
+    final businessName = _businessNameController.text.trim();
+    final businessType = (_businessType ?? '').trim();
+
+    if (name.isEmpty ||
+        phone.isEmpty ||
+        password.isEmpty ||
+        confirm.isEmpty ||
+        businessName.isEmpty ||
+        businessType.isEmpty ||
         !_agreeTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete the form first.')),
       );
       return;
     }
-    if (_passwordController.text != _confirmController.text) {
+    if (usesCloudSync && (email.isEmpty || !_emailPattern.hasMatch(email))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email for cloud sync.')),
+      );
+      return;
+    }
+    if (password.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password must be at least 6 characters.')),
+      );
+      return;
+    }
+    if (password != confirm) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Passwords do not match.')),
       );
@@ -193,11 +216,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     }
 
     await ref.read(sessionProvider.notifier).register(
-          displayName: _nameController.text.trim(),
-          phoneOrEmail: _phoneController.text.trim(),
-          businessName: _businessNameController.text.trim(),
-          businessType: _businessType!,
+          displayName: name,
+          phoneOrEmail: phone,
+          password: password,
+          businessName: businessName,
+          businessType: businessType,
           preferredLanguage: _language,
+          email: email,
         );
     if (!mounted) return;
     final session = ref.read(sessionProvider);
@@ -210,6 +235,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   Widget build(BuildContext context) {
     final session = ref.watch(sessionProvider);
     final textTheme = Theme.of(context).textTheme;
+    final usesCloudSync = SupabaseClientProvider.isConfigured;
 
     return Scaffold(
       body: Container(
@@ -261,9 +287,22 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       const SizedBox(height: 6),
                       TextField(controller: _phoneController, decoration: const InputDecoration(hintText: '+60 1X-XXXXXXX', prefixIcon: Icon(Icons.phone_iphone_rounded))),
                       const SizedBox(height: 16),
-                      const _FieldLabel(label: 'Email (optional)', muted: true),
+                      _FieldLabel(label: usesCloudSync ? 'Email' : 'Email (optional)', muted: !usesCloudSync),
                       const SizedBox(height: 6),
-                      TextField(controller: _emailController, decoration: const InputDecoration(hintText: 'For account recovery', prefixIcon: Icon(Icons.mail_outline_rounded))),
+                      TextField(
+                        controller: _emailController,
+                        decoration: InputDecoration(
+                          hintText: usesCloudSync ? 'Used for Supabase sign in on any device' : 'For account recovery',
+                          prefixIcon: const Icon(Icons.mail_outline_rounded),
+                        ),
+                      ),
+                      if (usesCloudSync) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Supabase sign in uses your email and password. Your phone still stays on the profile.',
+                          style: textTheme.bodySmall?.copyWith(color: AppTheme.charcoal.withValues(alpha: 0.7)),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       const _FieldLabel(label: 'Password'),
                       const SizedBox(height: 6),

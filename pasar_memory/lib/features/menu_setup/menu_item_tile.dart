@@ -98,9 +98,17 @@ class _MenuItemTileState extends State<MenuItemTile> {
         .toList(growable: false);
   }
 
+  double? _parsePrice(String raw) {
+    final normalized = raw
+      .replaceAll(RegExp(r'rm', caseSensitive: false), '')
+        .replaceAll(',', '.')
+        .trim();
+    return double.tryParse(normalized);
+  }
+
   Future<void> _save() async {
     final name = _nameController.text;
-    final price = double.tryParse(_priceController.text.replaceAll('RM', '').trim());
+    final price = _parsePrice(_priceController.text);
     final aliases = _parseAliases(_aliasesController.text);
 
     if (price == null) {

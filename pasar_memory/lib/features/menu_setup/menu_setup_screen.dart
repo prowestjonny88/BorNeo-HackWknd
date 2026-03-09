@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/session_provider.dart';
+import '../../data/repositories/menu_repo.dart';
 import 'menu_item_tile.dart';
 import 'menu_setup_provider.dart';
 
@@ -57,9 +58,17 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
         .toList(growable: false);
   }
 
+  double? _parsePrice(String raw) {
+    final normalized = raw
+      .replaceAll(RegExp(r'rm', caseSensitive: false), '')
+        .replaceAll(',', '.')
+        .trim();
+    return double.tryParse(normalized);
+  }
+
   Future<void> _add(MenuSetupController controller) async {
     final name = _nameController.text;
-    final price = double.tryParse(_priceController.text.replaceAll('RM', '').trim());
+    final price = _parsePrice(_priceController.text);
     final aliases = _parseAliases(_aliasesController.text);
 
     if (price == null) {
@@ -69,9 +78,9 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
       return;
     }
 
-    await controller.addMenuItem(name: name, price: price, aliases: aliases);
+    final saved = await controller.addMenuItem(name: name, price: price, aliases: aliases);
 
-    if (mounted) {
+    if (mounted && saved) {
       _nameController.clear();
       _aliasesController.clear();
       _priceController.clear();
@@ -203,6 +212,13 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
                                   : const Text('Add item', style: TextStyle(fontSize: 18)),
                             ),
                           ),
+                          if (state.cloudSyncMessage != null) ...[
+                            const SizedBox(height: 12),
+                            _CloudSyncBadge(
+                              status: state.cloudSyncState,
+                              message: state.cloudSyncMessage!,
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -279,17 +295,27 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
                   const SizedBox(height: 24),
                   if (isOnboarding)
                     FilledButton(
-                      onPressed: () async {
+                      onPressed: state.isSaving
+                          ? null
+                          : () async {
                         await ref.read(sessionProvider.notifier).completeMenuSetup();
                         if (!context.mounted) return;
                         context.go('/');
                       },
-                      child: const Text('Save Menu & Go to Dashboard ->'),
+                      child: state.isSaving
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Save Menu & Go to Dashboard ->'),
                     ),
                   if (isOnboarding) ...[
                     const SizedBox(height: 12),
                     TextButton(
-                      onPressed: () async {
+                      onPressed: state.isSaving
+                          ? null
+                          : () async {
                         await ref.read(sessionProvider.notifier).completeMenuSetup();
                         if (!context.mounted) return;
                         context.go('/');
@@ -306,6 +332,66 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
                   ),
                 ],
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CloudSyncBadge extends StatelessWidget {
+  const _CloudSyncBadge({
+    required this.status,
+    required this.message,
+  });
+
+  final MenuCloudSyncState? status;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final (IconData icon, Color color, Color bg) = switch (status) {
+      MenuCloudSyncState.pending => (
+          Icons.sync_rounded,
+          Colors.orange.shade800,
+          Colors.orange.shade50,
+        ),
+      MenuCloudSyncState.synced => (
+          Icons.cloud_done_rounded,
+          Colors.green.shade800,
+          Colors.green.shade50,
+        ),
+      MenuCloudSyncState.failed => (
+          Icons.cloud_off_rounded,
+          Colors.red.shade800,
+          Colors.red.shade50,
+        ),
+      null => (
+          Icons.cloud_queue_rounded,
+          Theme.of(context).colorScheme.onSurfaceVariant,
+          Theme.of(context).colorScheme.surfaceContainerHighest,
+        ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: color, fontWeight: FontWeight.w600),
             ),
           ),
         ],

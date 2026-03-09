@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/remote/supabase_client.dart';
 import '../../shared/theme/app_theme.dart';
 import 'session_provider.dart';
 
@@ -45,7 +46,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!mounted) return;
     switch (target) {
       case LoginTarget.register:
-        context.go('/register');
+        // Stay on login and show session error instead of forcing registration.
         break;
       case LoginTarget.menuSetup:
         context.go('/menu-setup');
@@ -60,6 +61,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final session = ref.watch(sessionProvider);
     final textTheme = Theme.of(context).textTheme;
+    final usesCloudSync = SupabaseClientProvider.isConfigured;
 
     return Scaffold(
       body: Container(
@@ -102,11 +104,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         const SizedBox(height: 6),
                         TextField(
                           controller: _identifierController,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             hintText: '+60 or email address',
-                            prefixIcon: Icon(Icons.phone_iphone_rounded),
+                            prefixIcon: const Icon(Icons.phone_iphone_rounded),
                           ),
                         ),
+                        if (usesCloudSync) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'You can login with email, or with phone after your first successful synced login.',
+                            style: textTheme.bodySmall?.copyWith(color: AppTheme.charcoal.withValues(alpha: 0.7)),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         _FieldLabel(label: 'Password'),
                         const SizedBox(height: 6),

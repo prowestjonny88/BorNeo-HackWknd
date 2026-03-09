@@ -141,6 +141,12 @@ class _EvidenceUploadScreenState extends ConsumerState<EvidenceUploadScreen> {
     await ref.read(evidenceProvider.notifier).addFromFilePicker(result.files);
   }
 
+  double _totalExtracted(EvidenceState state) {
+    return state.resultById.values
+        .expand((r) => r.amounts)
+        .fold<double>(0, (s, a) => s + a.amount);
+  }
+
   bool _isLikelyImage(String name) {
     final lower = name.toLowerCase();
     return lower.endsWith('.png') ||
@@ -315,47 +321,37 @@ class _EvidenceUploadScreenState extends ConsumerState<EvidenceUploadScreen> {
                       ],
                     ),
                     const SizedBox(height: 20),
-                    if (state.files.isNotEmpty) ...[
-                      SizedBox(
-                        height: 160,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: state.files.length,
-                          separatorBuilder: (context, index) => const SizedBox(width: 12),
-                          itemBuilder: (context, index) {
-                            final file = state.files[index];
-                            final status = state.statusById[file.id] ?? EvidenceProcessingStatus.idle;
-                            return SizedBox(
-                              width: 220,
-                              child: _EvidenceCard(
-                                file: file,
-                                status: status,
-                                thumbnail: _thumbnail(file),
-                                sourceLabel: _sourceLabel(file.source),
-                                onEdit: () => controller.processFile(file.id),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                    ],
-                    Text('EXTRACTED RESULTS', style: textTheme.labelMedium?.copyWith(color: AppTheme.amber)),
+                    if (state.files.isNotEmpty)
+                      Text('UPLOADED FILES', style: textTheme.labelMedium?.copyWith(color: AppTheme.amber)),
                     const SizedBox(height: 12),
                     if (state.files.isEmpty)
                       Card(
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'No evidence uploaded yet. Add your first screenshot to begin reconstruction.',
-                            style: textTheme.bodyLarge,
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            children: [
+                              Icon(Icons.photo_library_outlined,
+                                  size: 40,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              const SizedBox(height: 12),
+                              Text('No evidence uploaded yet.', style: textTheme.bodyLarge),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Add a screenshot to extract payment amounts.',
+                                textAlign: TextAlign.center,
+                                style: textTheme.bodyMedium?.copyWith(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              ),
+                            ],
                           ),
                         ),
                       )
-                    else
+                    else ...[
                       ...state.files.map((f) {
                         final status = state.statusById[f.id] ?? EvidenceProcessingStatus.idle;
                         final result = state.resultById[f.id];
+                        final extractedTotal =
+                            result?.amounts.fold<double>(0, (s, a) => s + a.amount) ?? 0;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: Card(
@@ -376,24 +372,95 @@ class _EvidenceUploadScreenState extends ConsumerState<EvidenceUploadScreen> {
                                               f.name,
                                               maxLines: 2,
                                               overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                              style: const TextStyle(
+                                                  fontSize: 14, fontWeight: FontWeight.w600),
                                             ),
-                                            const SizedBox(height: 6),
-                                            ConfidenceBadge(
-                                              type: status == EvidenceProcessingStatus.error
-                                                  ? ConfidenceBadgeType.needsReview
-                                                  : ConfidenceBadgeType.screenshot,
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              _sourceLabel(f.source),
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
                                             ),
                                           ],
                                         ),
                                       ),
-                                      TextButton(
-                                        onPressed: () => controller.processFile(f.id),
-                                        child: const Text('Edit'),
-                                      ),
+                                      if (status == EvidenceProcessingStatus.processing)
+                                        const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                                        )
+                                      else if (status == EvidenceProcessingStatus.done)
+                                        Icon(
+                                          extractedTotal > 0
+                                              ? Icons.check_circle_rounded
+                                              : Icons.info_outline_rounded,
+                                          color: extractedTotal > 0
+                                              ? AppTheme.jade
+                                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                                          size: 24,
+                                        )
+                                      else if (status == EvidenceProcessingStatus.error)
+                                        const Icon(Icons.error_outline_rounded,
+                                            color: AppTheme.coral, size: 24)
+                                      else
+                                        TextButton(
+                                          onPressed: () => controller.processFile(f.id),
+                                          child: const Text('Extract'),
+                                        ),
                                     ],
                                   ),
-                                  const SizedBox(height: 12),
+                                  if (status == EvidenceProcessingStatus.done && extractedTotal > 0)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 10),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.jade.withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                              color: AppTheme.jade.withValues(alpha: 0.35)),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.check_rounded,
+                                                color: AppTheme.jade, size: 16),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              'Extracted: RM ${extractedTotal.toStringAsFixed(2)}',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(
+                                                    color: AppTheme.jade,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                            ),
+                                            const Spacer(),
+                                            GestureDetector(
+                                              onTap: () => controller.processFile(f.id),
+                                              child: Text(
+                                                'Re-scan',
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall
+                                                    ?.copyWith(
+                                                      color: AppTheme.jade.withValues(alpha: 0.75),
+                                                      decoration: TextDecoration.underline,
+                                                    ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
                                   ExtractionPreview(
                                     fileId: f.id,
                                     status: status,
@@ -406,6 +473,43 @@ class _EvidenceUploadScreenState extends ConsumerState<EvidenceUploadScreen> {
                           ),
                         );
                       }),
+                      Builder(builder: (context) {
+                        final total = _totalExtracted(state);
+                        if (total <= 0) return const SizedBox.shrink();
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppTheme.jade.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppTheme.jade.withValues(alpha: 0.45)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.account_balance_wallet_outlined,
+                                  color: AppTheme.jade),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'DIGITAL TOTAL FROM SCREENSHOTS',
+                                      style: textTheme.labelMedium?.copyWith(color: AppTheme.jade),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'RM ${total.toStringAsFixed(2)}',
+                                      style: AppTheme.mono(size: 22, color: AppTheme.softWhite),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
                     const SizedBox(height: 20),
                     FilledButton(
                       onPressed: () async {
@@ -413,7 +517,7 @@ class _EvidenceUploadScreenState extends ConsumerState<EvidenceUploadScreen> {
                         if (!context.mounted) return;
                         context.go('/voice-recap');
                       },
-                      child: const Text('Confirm Evidence & Continue ->'),
+                      child: const Text('Confirm Evidence & Continue →'),
                     ),
                     const SizedBox(height: 88),
                   ],
