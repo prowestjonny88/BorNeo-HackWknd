@@ -38,6 +38,11 @@ class SellingScreen extends ConsumerWidget {
         title: const Text('Selling (Optional)'),
         actions: [
           IconButton(
+            tooltip: 'Add menu item',
+            onPressed: () => context.go('/menu'),
+            icon: const Icon(Icons.add_rounded),
+          ),
+          IconButton(
             tooltip: 'Refresh menu',
             onPressed: state.isLoading ? null : controller.refreshMenu,
             icon: const Icon(Icons.refresh),

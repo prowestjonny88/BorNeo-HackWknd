@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/session_provider.dart';
-import '../../data/repositories/menu_repo.dart';
+import '../../data/local/menu_file_cache.dart';
 import 'menu_item_tile.dart';
 import 'menu_setup_provider.dart';
 
@@ -101,6 +101,23 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
           : AppBar(
               title: const Text('Menu Setup'),
               actions: [
+                IconButton(
+                  tooltip: 'Check cache',
+                  icon: const Icon(Icons.storage_rounded),
+                  onPressed: () async {
+                    final accountId = ref.read(sessionProvider).accountKey;
+                    final summary = await MenuFileCache().debugSummary(accountId);
+                    if (!context.mounted) return;
+                    showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('Local Cache'),
+                        content: SelectableText(summary),
+                        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+                      ),
+                    );
+                  },
+                ),
                 IconButton(
                   tooltip: 'Refresh',
                   onPressed: state.isLoading ? null : controller.refresh,
@@ -212,13 +229,15 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
                                   : const Text('Add item', style: TextStyle(fontSize: 18)),
                             ),
                           ),
-                          if (state.cloudSyncMessage != null) ...[
-                            const SizedBox(height: 12),
-                            _CloudSyncBadge(
-                              status: state.cloudSyncState,
-                              message: state.cloudSyncMessage!,
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            height: 48,
+                            child: OutlinedButton.icon(
+                              onPressed: () => context.go('/'),
+                              icon: const Icon(Icons.home_rounded),
+                              label: const Text('Back to Home', style: TextStyle(fontSize: 16)),
                             ),
-                          ],
+                          ),
                         ],
                       ),
                     ),
@@ -340,62 +359,4 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
   }
 }
 
-class _CloudSyncBadge extends StatelessWidget {
-  const _CloudSyncBadge({
-    required this.status,
-    required this.message,
-  });
 
-  final MenuCloudSyncState? status;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final (IconData icon, Color color, Color bg) = switch (status) {
-      MenuCloudSyncState.pending => (
-          Icons.sync_rounded,
-          Colors.orange.shade800,
-          Colors.orange.shade50,
-        ),
-      MenuCloudSyncState.synced => (
-          Icons.cloud_done_rounded,
-          Colors.green.shade800,
-          Colors.green.shade50,
-        ),
-      MenuCloudSyncState.failed => (
-          Icons.cloud_off_rounded,
-          Colors.red.shade800,
-          Colors.red.shade50,
-        ),
-      null => (
-          Icons.cloud_queue_rounded,
-          Theme.of(context).colorScheme.onSurfaceVariant,
-          Theme.of(context).colorScheme.surfaceContainerHighest,
-        ),
-    };
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.45)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: color, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

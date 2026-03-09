@@ -84,7 +84,7 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                     Row(
                       children: [
                         IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
+                          onPressed: () => context.go('/'),
                           icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.softWhite),
                         ),
                         Expanded(
@@ -266,6 +266,85 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    // Unknown items warning — shown when Gemini detects items not in menu
+                    if (voiceState.unknownItemNames.isNotEmpty)
+                      Card(
+                        color: AppTheme.coral.withValues(alpha: 0.15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(color: AppTheme.coral.withValues(alpha: 0.5)),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.warning_amber_rounded, color: AppTheme.coral, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Items Not In Your Menu',
+                                    style: textTheme.labelMedium?.copyWith(
+                                      color: AppTheme.coral,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Your recap mentioned item(s) that are not in your menu:',
+                                style: textTheme.bodyMedium?.copyWith(color: AppTheme.softWhite),
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: voiceState.unknownItemNames
+                                    .map((name) => Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.coral.withValues(alpha: 0.2),
+                                            borderRadius: BorderRadius.circular(20),
+                                          ),
+                                          child: Text(
+                                            '"$name"',
+                                            style: textTheme.bodySmall?.copyWith(
+                                              color: AppTheme.coral,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ))
+                                    .toList(),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Please redo your recap using only items from your menu.',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: AppTheme.softWhite.withValues(alpha: 0.8),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    voiceController.reset();
+                                    _transcriptController.clear();
+                                  },
+                                  icon: const Icon(Icons.mic_rounded, size: 18),
+                                  label: const Text('Try Again'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.coral,
+                                    side: const BorderSide(color: AppTheme.coral),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     if (voiceState.isRecording &&
                         voiceState.partialTranscript != null &&
                         voiceState.partialTranscript!.isNotEmpty)
@@ -305,7 +384,9 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                               Row(
                                 children: [
                                   Text(
-                                    'TRANSCRIPT',
+                                    voiceState.correctedTranscript != null
+                                        ? 'TRANSCRIPT (AI CORRECTED)'
+                                        : 'TRANSCRIPT',
                                     style: textTheme.labelMedium?.copyWith(color: AppTheme.amber),
                                   ),
                                   const Spacer(),
@@ -317,6 +398,19 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                                     ),
                                 ],
                               ),
+                              if (voiceState.correctedTranscript != null) ...[
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.auto_fix_high_rounded, size: 14, color: AppTheme.jade),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Corrected by Gemini AI',
+                                      style: textTheme.bodySmall?.copyWith(color: AppTheme.jade),
+                                    ),
+                                  ],
+                                ),
+                              ],
                               const SizedBox(height: 10),
                               Container(
                                 width: double.infinity,
@@ -328,7 +422,7 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                                 child: SelectableText(
                                   (voiceState.transcript ?? '').isEmpty
                                       ? (voiceState.isProcessing
-                                          ? 'Analyzing your recap...'
+                                          ? 'Correcting & analyzing with Gemini AI...'
                                           : 'Your transcript will appear here after recording or manual input')
                                       : (voiceState.transcript ?? ''),
                                   style: textTheme.bodyLarge,
@@ -377,36 +471,7 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                           ),
                         ),
                       ),
-                    const SizedBox(height: 20),
-                    if (voiceState.isDone || voiceState.transcript?.isNotEmpty == true)
-                      FilledButton(
-                        onPressed: () async {
-                          if (voiceState.parsedRecap?.cashMention != null) {
-                            ref.read(spokenCashAmountProvider.notifier).set(
-                                  voiceState.parsedRecap!.cashMention!.amount,
-                                );
-                          } else if (voiceState.parsedRecap != null &&
-                              voiceState.parsedRecap!.items.isNotEmpty) {
-                            final menuItems = ref.read(sellingProvider).menuItems;
-                            final prices = {for (final m in menuItems) m.id: m.price};
-                            final estimated = voiceState.parsedRecap!.estimatedTotal(prices);
-                            if (estimated > 0) {
-                              ref.read(spokenCashAmountProvider.notifier).set(estimated);
-                            }
-                          }
-
-                          if (voiceState.transcript != null) {
-                            recapController.setTranscript(voiceState.transcript!);
-                            recapController.confirmTranscript();
-                          }
-
-                          if (context.mounted) {
-                            context.go('/review');
-                          }
-                        },
-                        child: const Text('Review Recap ->'),
-                      ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     if (voiceState.transcript?.isNotEmpty == true)
                       OutlinedButton(
                         onPressed: () {
@@ -423,6 +488,37 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                   ],
                 ),
               ),
+              if (voiceState.isDone || voiceState.transcript?.isNotEmpty == true)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: FilledButton(
+                    onPressed: () async {
+                      if (voiceState.parsedRecap?.cashMention != null) {
+                        ref.read(spokenCashAmountProvider.notifier).set(
+                              voiceState.parsedRecap!.cashMention!.amount,
+                            );
+                      } else if (voiceState.parsedRecap != null &&
+                          voiceState.parsedRecap!.items.isNotEmpty) {
+                        final menuItems = ref.read(sellingProvider).menuItems;
+                        final prices = {for (final m in menuItems) m.id: m.price};
+                        final estimated = voiceState.parsedRecap!.estimatedTotal(prices);
+                        if (estimated > 0) {
+                          ref.read(spokenCashAmountProvider.notifier).set(estimated);
+                        }
+                      }
+
+                      if (voiceState.transcript != null) {
+                        recapController.setTranscript(voiceState.transcript!);
+                        recapController.confirmTranscript();
+                      }
+
+                      if (context.mounted) {
+                        context.go('/review');
+                      }
+                    },
+                    child: const Text('Review Recap ->'),
+                  ),
+                ),
               const AppBottomNav(currentRoute: '/voice-recap'),
             ],
           ),
@@ -442,7 +538,7 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
       case VoiceRecordingState.transcribing:
         return 'Transcribing your voice...';
       case VoiceRecordingState.parsing:
-        return 'Analyzing your recap...';
+        return 'Correcting & parsing with Gemini AI...';
       case VoiceRecordingState.done:
         return 'Recap ready for review!';
       case VoiceRecordingState.error:

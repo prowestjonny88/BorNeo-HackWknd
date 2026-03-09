@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/local/menu_file_cache.dart';
 import '../../data/repositories/repository_providers.dart';
 import '../auth/session_provider.dart';
 import '../../models/menu_item.dart';
@@ -62,12 +63,31 @@ class SellingController extends Notifier<SellingState> {
         return;
       }
 
+      // Fast path: load from local file cache instantly (no DB/network wait)
+      final cached = await MenuFileCache().loadAll(accountId);
+      if (cached.isNotEmpty) {
+        final active = cached.where((e) => e.isActive).toList(growable: false)
+          ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        state = state.copyWith(isLoading: false, menuItems: active);
+        // Still refresh from SQLite in background to stay in sync
+        _refreshFromDb(accountId);
+        return;
+      }
+
+      // Fallback: slow path via SQLite (first run, cache not yet built)
+      await _refreshFromDb(accountId);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, errorMessage: 'Could not load menu.');
+    }
+  }
+
+  Future<void> _refreshFromDb(String accountId) async {
+    try {
       final repo = ref.read(menuRepositoryProvider);
       final all = await repo.getAllMenuItems(accountId: accountId);
-      final active = all.where((e) => e.isActive).toList(growable: false);
-      active.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      final active = all.where((e) => e.isActive).toList(growable: false)
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
-      // Drop counts for items that no longer exist/active.
       final nextCounts = <String, int>{};
       for (final item in active) {
         final count = state.countsByMenuItemId[item.id] ?? 0;
@@ -75,8 +95,8 @@ class SellingController extends Notifier<SellingState> {
       }
 
       state = state.copyWith(isLoading: false, menuItems: active, countsByMenuItemId: nextCounts);
-    } catch (e) {
-      state = state.copyWith(isLoading: false, errorMessage: 'Could not load menu.');
+    } catch (_) {
+      // Already showing cached data or previous state — silently ignore
     }
   }
 

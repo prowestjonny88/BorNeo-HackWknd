@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../local/database.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -32,6 +33,8 @@ class LedgerRepository {
   }
 
   Future<void> upsertLedger(Map<String, dynamic> ledger, {required String accountId}) async {
+    if (kIsWeb) return; // SQLite WASM not available on web
+
     final db = await _dbHelper.database;
     await db.insert(
       'daily_ledgers',
@@ -55,6 +58,8 @@ class LedgerRepository {
   }
 
   Future<Map<String, dynamic>?> getLedgerByDate(DateTime date, {required String accountId}) async {
+    if (kIsWeb) return null; // SQLite WASM not available on web
+
     final db = await _dbHelper.database;
     final dateStr = date.toIso8601String().split('T')[0];
     
@@ -69,6 +74,8 @@ class LedgerRepository {
   }
 
   Future<List<Map<String, dynamic>>> getRecentLedgers({required String accountId, int limit = 14}) async {
+    if (kIsWeb) return const []; // SQLite WASM not available on web
+
     final db = await _dbHelper.database;
     final localRows = await db.query(
       'daily_ledgers',

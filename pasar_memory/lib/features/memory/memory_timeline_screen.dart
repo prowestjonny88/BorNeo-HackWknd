@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +10,39 @@ import '../../shared/widgets/app_bottom_nav.dart';
 
 class MemoryTimelineScreen extends ConsumerWidget {
   const MemoryTimelineScreen({super.key});
+
+  /// Groups entries by calendar date (newest group first).
+  List<({String label, List<HistoryDayEntry> entries})> _groupByDay(
+    List<HistoryDayEntry> entries,
+  ) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+
+    final Map<String, List<HistoryDayEntry>> grouped = {};
+    for (final e in entries) {
+      final key = e.date.toIso8601String().split('T').first;
+      grouped.putIfAbsent(key, () => []).add(e);
+    }
+
+    final sortedKeys = grouped.keys.toList()
+      ..sort((a, b) => b.compareTo(a)); // newest first
+
+    return sortedKeys.map((key) {
+      final date = DateTime.tryParse(key)!;
+      final day = DateTime(date.year, date.month, date.day);
+      final String label;
+      if (day == today) {
+        label = 'Today';
+      } else if (day == yesterday) {
+        label = 'Yesterday';
+      } else {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        label = '${date.day} ${months[date.month - 1]} ${date.year}';
+      }
+      return (label: label, entries: grouped[key]!);
+    }).toList();
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -121,7 +155,7 @@ class MemoryTimelineScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 24),
                     Text(
-                      'RECENT DAYS', 
+                      'RECENT HISTORY',
                       style: textTheme.labelMedium?.copyWith(color: AppTheme.softWhite.withValues(alpha: 0.5)),
                     ),
                     const SizedBox(height: 12),
@@ -132,26 +166,59 @@ class MemoryTimelineScreen extends ConsumerWidget {
                         padding: EdgeInsets.only(top: 32),
                         child: Center(child: CircularProgressIndicator()),
                       )
+                    // Web: local storage not available
+                    else if (kIsWeb && historyState.filteredEntries.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          'History is saved locally and is only available on the mobile app. Use the Android or iOS version to view past day summaries.',
+                          style: textTheme.bodyMedium?.copyWith(color: AppTheme.softWhite.withValues(alpha: 0.72)),
+                        ),
+                      )
                     // Empty state
                     else if (historyState.filteredEntries.isEmpty)
                       Text(
                         'No saved ledgers yet. Finish one recap and save it to memory.',
                         style: textTheme.bodyMedium?.copyWith(color: AppTheme.softWhite.withValues(alpha: 0.72)),
                       )
-                    // Day entries
+                    // Day entries grouped by date
                     else
-                      ...historyState.filteredEntries.map(
-                        (entry) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _DayHistoryCard(
-                            entry: entry,
-                            onTap: () {
-                              historyController.selectEntry(entry);
-                              context.push('/ledger?date=${entry.date.toIso8601String().split('T').first}');
-                            },
-                          ),
-                        ),
-                      ),
+                      ...() {
+                        final groups = _groupByDay(historyState.filteredEntries);
+                        final widgets = <Widget>[];
+                        for (final group in groups) {
+                          widgets.add(
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8, top: 4),
+                              child: Text(
+                                group.label,
+                                style: textTheme.labelMedium?.copyWith(
+                                  color: AppTheme.amber,
+                                ),
+                              ),
+                            ),
+                          );
+                          for (final entry in group.entries) {
+                            widgets.add(
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _DayHistoryCard(
+                                  entry: entry,
+                                  onTap: () {
+                                    historyController.selectEntry(entry);
+                                    context.push('/ledger?date=${entry.date.toIso8601String().split('T').first}');
+                                  },
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                        return widgets;
+                      }(),
                     const SizedBox(height: 90),
                   ],
                 ),

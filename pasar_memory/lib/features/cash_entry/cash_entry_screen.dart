@@ -62,10 +62,14 @@ class _CashEntryScreenState extends ConsumerState<CashEntryScreen> {
     final state = ref.watch(cashEntryProvider);
     final controller = ref.read(cashEntryProvider.notifier);
 
-    return PopScope(
-      canPop: false,
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Counted Cash')),
+    return Scaffold(
+        appBar: AppBar(
+          title: const Text('Counted Cash'),
+          leading: IconButton(
+            onPressed: () => context.go('/'),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+        ),
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -164,10 +168,10 @@ class _CashEntryScreenState extends ConsumerState<CashEntryScreen> {
             ),
           ),
         ),
-      ),
     );
   }
 }
+
 
 class _SingleDecimalPointFormatter extends TextInputFormatter {
   @override

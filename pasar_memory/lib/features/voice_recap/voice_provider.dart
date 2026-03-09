@@ -6,6 +6,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 
 import '../../data/repositories/repository_providers.dart';
 import '../../models/menu_item.dart';
+import '../../services/recap_parser/gemini_recap_service.dart';
 import '../../services/recap_parser/menu_aware_parser.dart';
 import '../auth/session_provider.dart';
 import '../selling/selling_provider.dart';
@@ -39,6 +40,8 @@ class VoiceState {
     this.parsedRecap,
     this.errorMessage,
     this.amplitude = 0.0,
+    this.unknownItemNames = const [],
+    this.correctedTranscript,
   });
 
   /// Current recording state
@@ -65,6 +68,12 @@ class VoiceState {
   /// Current audio amplitude (for waveform visualization)
   final double amplitude;
 
+  /// Food names from the transcript that did not match any menu item
+  final List<String> unknownItemNames;
+
+  /// Gemini-corrected transcript (fixes mishears from STT)
+  final String? correctedTranscript;
+
   bool get isRecording => recordingState == VoiceRecordingState.recording;
   bool get hasRecording => transcript != null && transcript!.isNotEmpty;
   bool get isProcessing =>
@@ -90,6 +99,10 @@ class VoiceState {
     String? errorMessage,
     bool clearError = false,
     double? amplitude,
+    List<String>? unknownItemNames,
+    bool clearUnknownItems = false,
+    String? correctedTranscript,
+    bool clearCorrectedTranscript = false,
   }) {
     return VoiceState(
       recordingState: recordingState ?? this.recordingState,
@@ -100,6 +113,8 @@ class VoiceState {
       parsedRecap: clearParsedRecap ? null : (parsedRecap ?? this.parsedRecap),
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       amplitude: amplitude ?? this.amplitude,
+      unknownItemNames: clearUnknownItems ? const [] : (unknownItemNames ?? this.unknownItemNames),
+      correctedTranscript: clearCorrectedTranscript ? null : (correctedTranscript ?? this.correctedTranscript),
     );
   }
 }
@@ -295,20 +310,76 @@ class VoiceController extends Notifier<VoiceState> {
     await _parseTranscript(transcript);
   }
 
-  /// Parse transcript against menu items
+  /// Parse transcript against menu items — uses Gemini AI, falls back to rule-based parser
   Future<void> _parseTranscript(String transcript) async {
-    try {
-      final sellingState = ref.read(sellingProvider);
-      final menuItems = sellingState.menuItems;
+    var menuItems = ref.read(sellingProvider).menuItems;
 
+    // If selling provider hasn't loaded yet, read directly from file cache
+    if (menuItems.isEmpty) {
+      final accountId = ref.read(sessionProvider).accountKey;
+      if (accountId.isNotEmpty) {
+        final repo = ref.read(menuRepositoryProvider);
+        menuItems = await repo.getAllMenuItems(accountId: accountId);
+      }
+    }
+
+    // --- Try Gemini AI first ---
+    try {
+      final gemini = GeminiRecapService();
+      final result = await gemini.parse(transcript, menuItems);
+
+      // User mentioned items not in the menu — ask them to redo
+      if (result.hasUnknownItems) {
+        final names = result.unknownItems.join(', ');
+        state = state.copyWith(
+          recordingState: VoiceRecordingState.error,
+          errorMessage:
+              'These item(s) are not in your menu: $names. Please redo your voice recap using only items from your menu.',
+          unknownItemNames: result.unknownItems,
+          transcript: transcript,
+          correctedTranscript: result.correctedTranscript,
+        );
+        return;
+      }
+
+      // User said quantity before item name — enforce ordering rule
+      if (result.hasOrderingError) {
+        final examples = result.orderingErrorItems.join(', ');
+        state = state.copyWith(
+          recordingState: VoiceRecordingState.error,
+          errorMessage:
+              'Please say the item name first, then the quantity. Wrong order detected: $examples. '
+              'Example: say "mee 10", not "10 mee".',
+          unknownItemNames: const [],
+          transcript: transcript,
+          correctedTranscript: result.correctedTranscript,
+        );
+        return;
+      }
+
+      state = state.copyWith(
+        parsedRecap: result.parsedRecap,
+        recordingState: VoiceRecordingState.done,
+        clearUnknownItems: true,
+        correctedTranscript: result.correctedTranscript,
+        // Replace raw STT transcript with the corrected version for display
+        transcript: result.correctedTranscript ?? transcript,
+      );
+      _applyParsedItemsToSelling(result.parsedRecap);
+      return;
+    } catch (_) {
+      // Gemini unavailable (no internet, quota, etc.) — fall back to local parser
+    }
+
+    // --- Fallback: local rule-based parser ---
+    try {
       final parser = MenuAwareParser();
       final parsedRecap = parser.parse(transcript, menuItems);
-
       state = state.copyWith(
         parsedRecap: parsedRecap,
         recordingState: VoiceRecordingState.done,
+        clearUnknownItems: true,
       );
-
       _applyParsedItemsToSelling(parsedRecap);
     } catch (e) {
       state = state.copyWith(

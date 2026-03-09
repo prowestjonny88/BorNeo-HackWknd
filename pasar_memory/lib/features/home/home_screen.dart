@@ -114,7 +114,22 @@ class HomeScreen extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 24),
-                    Text('QUICK TAPS', style: textTheme.labelMedium?.copyWith(color: AppTheme.amber)),
+                    Row(
+                      children: [
+                        Text('QUICK TAPS', style: textTheme.labelMedium?.copyWith(color: AppTheme.amber)),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: () => context.go('/menu'),
+                          icon: const Icon(Icons.add_rounded, size: 16),
+                          label: const Text('Add item'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTheme.amber,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       'Tap to count a sale. Long press to undo or adjust.',

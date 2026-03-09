@@ -1,10 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../data/repositories/menu_repo.dart';
 import '../../data/repositories/repository_providers.dart';
 import '../auth/session_provider.dart';
 import '../../models/menu_item.dart';
@@ -14,8 +11,6 @@ class MenuSetupState {
   final bool isSaving;
   final List<MenuItem> items;
   final Map<String, List<String>> aliasesById;
-  final MenuCloudSyncState? cloudSyncState;
-  final String? cloudSyncMessage;
   final String? errorMessage;
 
   const MenuSetupState({
@@ -23,8 +18,6 @@ class MenuSetupState {
     this.isSaving = false,
     this.items = const <MenuItem>[],
     this.aliasesById = const <String, List<String>>{},
-    this.cloudSyncState,
-    this.cloudSyncMessage,
     this.errorMessage,
   });
 
@@ -33,19 +26,14 @@ class MenuSetupState {
     bool? isSaving,
     List<MenuItem>? items,
     Map<String, List<String>>? aliasesById,
-    MenuCloudSyncState? cloudSyncState,
-    String? cloudSyncMessage,
     String? errorMessage,
     bool clearError = false,
-    bool clearCloudSync = false,
   }) {
     return MenuSetupState(
       isLoading: isLoading ?? this.isLoading,
       isSaving: isSaving ?? this.isSaving,
       items: items ?? this.items,
       aliasesById: aliasesById ?? this.aliasesById,
-      cloudSyncState: clearCloudSync ? null : (cloudSyncState ?? this.cloudSyncState),
-      cloudSyncMessage: clearCloudSync ? null : (cloudSyncMessage ?? this.cloudSyncMessage),
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
     );
   }
@@ -55,26 +43,6 @@ class MenuSetupController extends Notifier<MenuSetupState> {
   static const Uuid _uuid = Uuid();
 
   String get _accountId => ref.read(sessionProvider).accountKey;
-
-  void _handleCloudSyncState(MenuCloudSyncState syncState) {
-    switch (syncState) {
-      case MenuCloudSyncState.pending:
-        state = state.copyWith(
-          cloudSyncState: MenuCloudSyncState.pending,
-          cloudSyncMessage: 'Cloud sync pending...',
-        );
-      case MenuCloudSyncState.synced:
-        state = state.copyWith(
-          cloudSyncState: MenuCloudSyncState.synced,
-          cloudSyncMessage: 'Cloud synced',
-        );
-      case MenuCloudSyncState.failed:
-        state = state.copyWith(
-          cloudSyncState: MenuCloudSyncState.failed,
-          cloudSyncMessage: 'Cloud sync failed (saved locally)',
-        );
-    }
-  }
 
   @override
   MenuSetupState build() {
@@ -133,7 +101,7 @@ class MenuSetupController extends Notifier<MenuSetupState> {
       return false;
     }
 
-    state = state.copyWith(isSaving: true, clearError: true, clearCloudSync: true);
+    state = state.copyWith(isSaving: true, clearError: true);
     try {
       final repo = ref.read(menuRepositoryProvider);
       final item = MenuItem(
@@ -142,13 +110,7 @@ class MenuSetupController extends Notifier<MenuSetupState> {
         price: price,
         isActive: true,
       );
-      await repo
-          .upsertMenuItem(
-            item,
-            accountId: _accountId,
-            onCloudSyncState: _handleCloudSyncState,
-          )
-          .timeout(const Duration(seconds: 5));
+      await repo.upsertMenuItem(item, accountId: _accountId);
 
       final nextItems = [...state.items, item];
       nextItems.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
@@ -163,11 +125,6 @@ class MenuSetupController extends Notifier<MenuSetupState> {
         aliasesById: nextAliases,
       );
       return true;
-    } on TimeoutException {
-      state = state.copyWith(
-        errorMessage: 'Saving is taking too long. Please check connection and try again.',
-      );
-      return false;
     } catch (e, st) {
       debugPrint('MenuSetupController.addMenuItem failed: $e\n$st');
       state = state.copyWith(
@@ -202,17 +159,11 @@ class MenuSetupController extends Notifier<MenuSetupState> {
       return;
     }
 
-    state = state.copyWith(isSaving: true, clearError: true, clearCloudSync: true);
+    state = state.copyWith(isSaving: true, clearError: true);
     try {
       final repo = ref.read(menuRepositoryProvider);
       final updated = item.copyWith(name: trimmedName, price: price, isActive: isActive);
-        await repo
-          .upsertMenuItem(
-            updated,
-            accountId: _accountId,
-            onCloudSyncState: _handleCloudSyncState,
-          )
-          .timeout(const Duration(seconds: 5));
+      await repo.upsertMenuItem(updated, accountId: _accountId);
 
       final nextItems = state.items
           .map((e) => e.id == updated.id ? updated : e)
@@ -226,10 +177,6 @@ class MenuSetupController extends Notifier<MenuSetupState> {
       }
 
       state = state.copyWith(items: sorted, aliasesById: nextAliases);
-    } on TimeoutException {
-      state = state.copyWith(
-        errorMessage: 'Update timed out. Please retry in a moment.',
-      );
     } catch (e, st) {
       debugPrint('MenuSetupController.updateMenuItem failed: $e\n$st');
       state = state.copyWith(
@@ -248,17 +195,10 @@ class MenuSetupController extends Notifier<MenuSetupState> {
       return;
     }
 
-    state = state.copyWith(isSaving: true, clearError: true, clearCloudSync: true);
+    state = state.copyWith(isSaving: true, clearError: true);
     try {
       final repo = ref.read(menuRepositoryProvider);
-      await repo
-          .toggleMenuItemStatus(
-            item.id,
-            isActive,
-            accountId: _accountId,
-            onCloudSyncState: _handleCloudSyncState,
-          )
-          .timeout(const Duration(seconds: 5));
+      await repo.toggleMenuItemStatus(item.id, isActive, accountId: _accountId);
 
       final updated = item.copyWith(isActive: isActive);
       final nextItems = state.items
@@ -266,8 +206,6 @@ class MenuSetupController extends Notifier<MenuSetupState> {
           .toList(growable: false);
 
       state = state.copyWith(items: nextItems);
-    } on TimeoutException {
-      state = state.copyWith(errorMessage: 'Status update timed out. Please retry.');
     } catch (e, st) {
       debugPrint('MenuSetupController.toggleActive failed: $e\n$st');
       state = state.copyWith(errorMessage: 'Could not update status.');
@@ -284,24 +222,16 @@ class MenuSetupController extends Notifier<MenuSetupState> {
       return;
     }
 
-    state = state.copyWith(isSaving: true, clearError: true, clearCloudSync: true);
+    state = state.copyWith(isSaving: true, clearError: true);
     try {
       final repo = ref.read(menuRepositoryProvider);
-      await repo
-          .deleteMenuItem(
-            id,
-            accountId: _accountId,
-            onCloudSyncState: _handleCloudSyncState,
-          )
-          .timeout(const Duration(seconds: 5));
+      await repo.deleteMenuItem(id, accountId: _accountId);
 
       final nextItems = state.items.where((e) => e.id != id).toList(growable: false);
       final nextAliases = Map<String, List<String>>.from(state.aliasesById);
       nextAliases.remove(id);
 
       state = state.copyWith(items: nextItems, aliasesById: nextAliases);
-    } on TimeoutException {
-      state = state.copyWith(errorMessage: 'Delete timed out. Please retry.');
     } catch (e, st) {
       debugPrint('MenuSetupController.deleteMenuItem failed: $e\n$st');
       state = state.copyWith(errorMessage: 'Could not delete item.');

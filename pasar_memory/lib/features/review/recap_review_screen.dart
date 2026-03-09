@@ -24,6 +24,8 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
   late final TextEditingController _cashController;
   late final ProviderSubscription<RecapDraftState> _recapSubscription;
   bool _cashManuallyEdited = false;
+  // menuItemId → quantity for items the user added manually
+  final Map<String, int> _manualItems = {};
 
   @override
   void initState() {
@@ -131,7 +133,22 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
               const SizedBox(height: 20),
             ],
             
-            Text('ITEMS DETECTED FROM YOUR RECAP', style: textTheme.labelMedium?.copyWith(color: AppTheme.amber)),
+            Row(
+              children: [
+                Text('ITEMS DETECTED FROM YOUR RECAP', style: textTheme.labelMedium?.copyWith(color: AppTheme.amber)),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => _showAddItemSheet(context),
+                  icon: const Icon(Icons.add_rounded, size: 16),
+                  label: const Text('Add item'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.amber,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             
             // Show parsed items from voice if available
@@ -204,6 +221,36 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
                   );
                 },
               ),
+            // Manually added items
+            if (_manualItems.isNotEmpty)
+              ..._manualItems.entries.map((e) {
+                final menuItem = sellingState.menuItems.firstWhere(
+                  (m) => m.id == e.key,
+                  orElse: () => sellingState.menuItems.first,
+                );
+                final qty = e.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _ReviewItemRow(
+                    name: menuItem.name,
+                    alias: 'Manually added',
+                    qty: qty,
+                    subtotal: 'RM ${(menuItem.price * qty).toStringAsFixed(2)}',
+                    badge: ConfidenceBadgeType.estimated,
+                    onDecrement: () {
+                      setState(() {
+                        if (qty <= 1) {
+                          _manualItems.remove(e.key);
+                        } else {
+                          _manualItems[e.key] = qty - 1;
+                        }
+                      });
+                    },
+                    onIncrement: () => setState(() => _manualItems[e.key] = qty + 1),
+                    onToggleReject: () => setState(() => _manualItems.remove(e.key)),
+                  ),
+                );
+              }),
             const SizedBox(height: 24),
             
             // Show detected cash from voice
@@ -323,14 +370,91 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
               onPressed: recap.isSaving || !cashState.isConfirmed
                   ? null
                   : () async {
-                      // Apply review state to selling
-                      reviewController.applyToSelling();
-                      
+                      try {
+                        reviewController.applyToSelling();
+                      } catch (_) {
+                        // Non-fatal: selling counts may not apply if menu changed
+                      }
+
                       await recapController.saveRecap();
                       if (!context.mounted) return;
                       context.go('/ledger');
                     },
               child: const Text('Save Recap & Continue ->'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddItemSheet(BuildContext context) {
+    final sellingState = ref.read(sellingProvider);
+    final voiceState = ref.read(voiceProvider);
+    final parsedIds = (voiceState.parsedRecap?.items ?? []).map((i) => i.menuItemId).toSet();
+    final tappedIds = sellingState.menuItems
+        .where((m) => (sellingState.countsByMenuItemId[m.id] ?? 0) > 0)
+        .map((m) => m.id)
+        .toSet();
+    final alreadyShown = {...parsedIds, ...tappedIds, ..._manualItems.keys};
+    final available = sellingState.menuItems
+        .where((m) => !alreadyShown.contains(m.id))
+        .toList(growable: false);
+
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('All menu items are already in the recap.')));
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.55,
+        maxChildSize: 0.85,
+        builder: (_, scrollController) => Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'Add Missing Item',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                itemCount: available.length,
+                itemBuilder: (_, i) {
+                  final item = available[i];
+                  return ListTile(
+                    title: Text(item.name),
+                    subtitle: Text('RM ${item.price.toStringAsFixed(2)}'),
+                    trailing: const Icon(Icons.add_circle_outline_rounded, color: AppTheme.amber),
+                    onTap: () {
+                      Navigator.pop(context);
+                      setState(() => _manualItems[item.id] = 1);
+                    },
+                  );
+                },
+              ),
             ),
           ],
         ),

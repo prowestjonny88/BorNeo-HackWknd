@@ -154,11 +154,9 @@ class RecapReviewController extends Notifier<RecapReviewState> {
 
     for (final item in state.acceptedItems) {
       final quantity = state.getEffectiveQuantity(item.menuItemId, item.quantity);
-      final menuItem = sellingState.menuItems.firstWhere(
-        (m) => m.id == item.menuItemId,
-        orElse: () => throw Exception('Menu item not found: ${item.menuItemId}'),
-      );
-      sellingController.updateCount(menuItem, quantity);
+      final menuItems = sellingState.menuItems.where((m) => m.id == item.menuItemId).toList();
+      if (menuItems.isEmpty) continue; // skip items not in current menu
+      sellingController.updateCount(menuItems.first, quantity);
     }
 
     // Apply cash to spoken cash provider

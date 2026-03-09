@@ -18,6 +18,7 @@ dependencies:
   sqflite_common_ffi:
   sqflite_common_ffi_web:
   path:
+  path_provider: ^2.1.5
   dio:
   freezed_annotation:
   json_annotation:
@@ -27,6 +28,7 @@ dependencies:
   google_mlkit_text_recognition:
   record:
   speech_to_text: ^7.0.0
+  google_generative_ai: ^0.4.0
   supabase_flutter:
   intl:
   uuid:

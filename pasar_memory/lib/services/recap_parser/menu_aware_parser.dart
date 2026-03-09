@@ -241,21 +241,20 @@ class MenuAwareParser {
         soldOutItems.add(item.name);
       }
 
-      // Try to extract quantity
+      // Try to extract quantity; default to 1 if none found
       final quantityResult = _extractQuantity(context, term);
       final isApproximate = _approximateIndicators.hasMatch(context);
 
-      if (quantityResult != null || isSoldOut) {
-        detectedItems.add(ParsedItemMention(
-          menuItemId: item.id,
-          menuItemName: item.name,
-          quantity: quantityResult ?? (isSoldOut ? 0 : 1),
-          confidence: _determineItemConfidence(quantityResult, isApproximate, isSoldOut),
-          rawMention: context.trim(),
-          isApproximate: isApproximate,
-          isSoldOut: isSoldOut,
-        ));
-      }
+      // Always add detected item — quantity defaults to 1 if not explicitly mentioned
+      detectedItems.add(ParsedItemMention(
+        menuItemId: item.id,
+        menuItemName: item.name,
+        quantity: quantityResult ?? (isSoldOut ? 0 : 1),
+        confidence: _determineItemConfidence(quantityResult, isApproximate, isSoldOut),
+        rawMention: context.trim(),
+        isApproximate: isApproximate,
+        isSoldOut: isSoldOut,
+      ));
     }
 
     // Extract cash mention
@@ -283,24 +282,28 @@ class MenuAwareParser {
     );
   }
 
-  /// Extract quantity from context around an item mention
+  /// Extract quantity from context around an item mention.
+  /// ORDERING RULE: quantity must appear AFTER the item name, never before.
   int? _extractQuantity(String context, String itemName) {
-    // Pattern: number before or after item name
-    // Examples: "30 bihun", "bihun 30", "dalam 30 portion"
+    // Find where the item name ends within the context string
+    final itemIndex = context.indexOf(itemName);
+    if (itemIndex == -1) return null;
 
-    // Try digit patterns
-    final digitMatches = RegExp(r'\b(\d+)\b').allMatches(context);
+    // Only look at the substring AFTER the item name
+    final afterItem = context.substring(itemIndex + itemName.length);
+
+    // Try digit patterns after item name
+    final digitMatches = RegExp(r'\b(\d+)\b').allMatches(afterItem);
     for (final match in digitMatches) {
       final value = int.tryParse(match.group(1) ?? '');
       if (value != null && value > 0 && value < 500) {
-        // Reasonable quantity range for hawker stall
         return value;
       }
     }
 
-    // Try Malay number words
+    // Try Malay number words after item name
     for (final entry in _malayNumbers.entries) {
-      if (context.contains(entry.key)) {
+      if (afterItem.contains(entry.key)) {
         return entry.value;
       }
     }
