@@ -9,6 +9,8 @@ import 'ledger_repo.dart';
 import 'correction_repo.dart';
 import '../remote/supabase_account_service.dart';
 import '../../services/sync/sync_service.dart';
+import '../../services/ocr/ocr_service.dart';
+import '../../services/reconciliation/reconciliation_engine.dart';
 
 // --- Repositories ---
 final merchantRepositoryProvider = Provider((ref) => MerchantRepository());
@@ -23,3 +25,5 @@ final supabaseAccountServiceProvider = Provider((ref) => SupabaseAccountService(
 
 // --- Services ---
 final syncServiceProvider = Provider((ref) => SyncService());
+final ocrServiceProvider = Provider((ref) => OcrService());
+final reconciliationEngineProvider = Provider((ref) => ReconciliationEngine());

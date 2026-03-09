@@ -21,13 +21,22 @@ class RecapReviewScreen extends ConsumerStatefulWidget {
 
 class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
   late final TextEditingController _notesController;
+  late final TextEditingController _cashController;
   late final ProviderSubscription<RecapDraftState> _recapSubscription;
+  bool _cashManuallyEdited = false;
 
   @override
   void initState() {
     super.initState();
     final recap = ref.read(recapDraftProvider);
+    final cashState = ref.read(cashEntryProvider);
+    final voiceState = ref.read(voiceProvider);
+    final initialCash = cashState.amount ??
+      voiceState.parsedRecap?.cashMention?.amount ??
+      recap.cashSuggestion ??
+      0.0;
     _notesController = TextEditingController(text: recap.notes);
+    _cashController = TextEditingController(text: initialCash.toStringAsFixed(2));
     _recapSubscription = ref.listenManual<RecapDraftState>(recapDraftProvider, (prev, next) {
       if (next.notes != _notesController.text) {
         _notesController.value = _notesController.value.copyWith(
@@ -50,6 +59,7 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
   void dispose() {
     _recapSubscription.close();
     _notesController.dispose();
+    _cashController.dispose();
     super.dispose();
   }
 
@@ -64,6 +74,14 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
     final reviewController = ref.read(recapReviewProvider.notifier);
     final cashState = ref.watch(cashEntryProvider);
     final textTheme = Theme.of(context).textTheme;
+
+    final suggestedCash = cashState.amount ??
+        voiceState.parsedRecap?.cashMention?.amount ??
+        recap.cashSuggestion ??
+        0.0;
+    if (!_cashManuallyEdited && _cashController.text.trim().isEmpty) {
+      _cashController.text = suggestedCash.toStringAsFixed(2);
+    }
     
     // Get items from selling state (tapped) OR from voice parsed recap
     final tappedItems = sellingState.menuItems
@@ -201,11 +219,22 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
                       children: [
                         Text('RM', style: AppTheme.mono(size: 20, color: AppTheme.amber, weight: FontWeight.w700)),
                         const SizedBox(width: 12),
-                        Text(
-                          (cashState.amount ?? 
-                           voiceState.parsedRecap?.cashMention?.amount ?? 
-                           recap.cashSuggestion ?? 0).toStringAsFixed(2), 
-                          style: AppTheme.mono(size: 28, color: AppTheme.charcoal),
+                        Expanded(
+                          child: TextField(
+                            controller: _cashController,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            style: AppTheme.mono(size: 28, color: AppTheme.charcoal),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              border: InputBorder.none,
+                              hintText: '0.00',
+                            ),
+                            onChanged: (value) {
+                              _cashManuallyEdited = true;
+                              ref.read(cashEntryProvider.notifier).setAmountText(value);
+                              reviewController.setCashAmount(double.tryParse(value.trim()));
+                            },
+                          ),
                         ),
                       ],
                     ),
@@ -246,6 +275,7 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
                         child: FilledButton(
                           onPressed: () {
                             final amount = cashState.amount ??
+                                double.tryParse(_cashController.text.trim()) ??
                                 voiceState.parsedRecap?.cashMention?.amount ??
                                 recap.cashSuggestion ??
                                 0.0;
@@ -254,6 +284,7 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
                           child: Text(
                             () {
                               final amount = cashState.amount ??
+                                  double.tryParse(_cashController.text.trim()) ??
                                   voiceState.parsedRecap?.cashMention?.amount ??
                                   recap.cashSuggestion;
                               return (amount != null && amount > 0)

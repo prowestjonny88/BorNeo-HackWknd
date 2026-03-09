@@ -69,6 +69,7 @@ class CashEntryController extends Notifier<CashEntryState> {
     state = state.copyWith(
       amountText: cleaned,
       amount: parsed,
+      isConfirmed: false,
       wasPrefilled: false,
       clearBanner: true,
     );

@@ -208,6 +208,64 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'MANUAL TEXT INPUT',
+                                  style: textTheme.labelMedium?.copyWith(color: AppTheme.amber),
+                                ),
+                                const Spacer(),
+                                TextButton.icon(
+                                  onPressed: voiceState.isProcessing
+                                      ? null
+                                      : () async {
+                                          final text = _transcriptController.text.trim();
+                                          if (text.isEmpty) {
+                                            ScaffoldMessenger.of(context)
+                                              ..hideCurrentSnackBar()
+                                              ..showSnackBar(
+                                                const SnackBar(content: Text('Please type your recap first.')),
+                                              );
+                                            return;
+                                          }
+                                          voiceController.setTranscript(text);
+                                          await voiceController.reparseTranscript();
+                                        },
+                                  icon: const Icon(Icons.auto_fix_high_rounded, size: 18),
+                                  label: const Text('Parse Text'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: _transcriptController,
+                              minLines: 4,
+                              maxLines: 7,
+                              onChanged: voiceController.setTranscript,
+                              enabled: !voiceState.isProcessing,
+                              decoration: const InputDecoration(
+                                hintText: 'Example: Today bihun 30, mee 10, cash 320, most payment QR.',
+                              ),
+                              style: textTheme.bodyLarge,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Tip: You can skip microphone and type recap directly, then tap Parse Text.',
+                              style: textTheme.bodySmall?.copyWith(
+                                color: AppTheme.softWhite.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     if (voiceState.isRecording &&
                         voiceState.partialTranscript != null &&
                         voiceState.partialTranscript!.isNotEmpty)
@@ -260,18 +318,21 @@ class _VoiceRecapScreenState extends ConsumerState<VoiceRecapScreen> {
                                 ],
                               ),
                               const SizedBox(height: 10),
-                              TextField(
-                                controller: _transcriptController,
-                                minLines: 4,
-                                maxLines: 7,
-                                onChanged: voiceController.setTranscript,
-                                decoration: InputDecoration(
-                                  hintText: voiceState.isProcessing
-                                      ? 'Analyzing your recap...'
-                                      : 'Your transcript will appear here after recording',
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: AppTheme.softWhite.withValues(alpha: 0.18)),
                                 ),
-                                style: textTheme.bodyLarge,
-                                enabled: !voiceState.isProcessing,
+                                child: SelectableText(
+                                  (voiceState.transcript ?? '').isEmpty
+                                      ? (voiceState.isProcessing
+                                          ? 'Analyzing your recap...'
+                                          : 'Your transcript will appear here after recording or manual input')
+                                      : (voiceState.transcript ?? ''),
+                                  style: textTheme.bodyLarge,
+                                ),
                               ),
                               const SizedBox(height: 8),
                               if (voiceState.parsedRecap?.cashMention != null)

@@ -128,13 +128,6 @@ class HistoryController extends Notifier<HistoryState> {
 
     try {
       final accountId = ref.read(sessionProvider).accountKey;
-      if (accountId.isEmpty) {
-        state = state.copyWith(
-          isLoading: false,
-          entries: const [],
-        );
-        return;
-      }
 
       final ledgerRepo = ref.read(ledgerRepositoryProvider);
       final rawEntries = await ledgerRepo.getRecentLedgers(accountId: accountId);
@@ -183,8 +176,5 @@ final historyProvider = NotifierProvider<HistoryController, HistoryState>(
 /// Provider for legacy memory timeline (backward compatibility)
 final memoryTimelineProvider = FutureProvider<List<Map<String, dynamic>>>((ref) {
   final accountId = ref.watch(sessionProvider).accountKey;
-  if (accountId.isEmpty) {
-    return Future.value(const <Map<String, dynamic>>[]);
-  }
   return ref.read(ledgerRepositoryProvider).getRecentLedgers(accountId: accountId);
 });

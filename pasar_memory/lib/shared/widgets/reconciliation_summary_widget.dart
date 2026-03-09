@@ -39,7 +39,7 @@ class ReconciliationSummaryWidget extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(totalSales, style: AppTheme.mono(size: 42, color: AppTheme.amber)),
-          const Spacer(),
+          const SizedBox(height: 18),
           Row(
             children: [
               _StatColumn(label: 'Digital Total', value: digitalTotal),

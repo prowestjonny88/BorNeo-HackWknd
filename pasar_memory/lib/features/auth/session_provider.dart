@@ -21,6 +21,8 @@ enum LoginTarget {
 }
 
 class SessionState {
+  static const String localGuestAccountId = 'local-device';
+
   const SessionState({
     this.isReady = false,
     this.isBusy = false,
@@ -49,7 +51,12 @@ class SessionState {
   final int totalTapCount;
   final String? errorMessage;
 
-  String get accountKey => accountId.isNotEmpty ? accountId : normalizeAccountKey(phoneOrEmail);
+  String get accountKey {
+    if (accountId.isNotEmpty) return accountId;
+    final normalized = normalizeAccountKey(phoneOrEmail);
+    if (normalized.isNotEmpty) return normalized;
+    return localGuestAccountId;
+  }
 
   SessionTimeOfDay get timeOfDay {
     final hour = DateTime.now().hour;

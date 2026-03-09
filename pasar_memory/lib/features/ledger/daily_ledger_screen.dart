@@ -3,10 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../data/repositories/repository_providers.dart';
+import '../../services/ocr/screenshot_parser.dart';
+import '../../services/reconciliation/confidence_rules.dart';
+import '../../services/reconciliation/reconciliation_engine.dart';
 import '../auth/session_provider.dart';
 import '../cash_entry/cash_entry_provider.dart';
 import '../evidence/evidence_provider.dart';
 import '../selling/selling_provider.dart';
+import '../voice_recap/voice_provider.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/confidence_badge.dart';
 import '../../shared/widgets/progress_stepper.dart';
@@ -20,17 +24,62 @@ class DailyLedgerScreen extends ConsumerWidget {
     final sellingState = ref.watch(sellingProvider);
     final cashState = ref.watch(cashEntryProvider);
     final evidenceState = ref.watch(evidenceProvider);
+    final voiceState = ref.watch(voiceProvider);
+    final reconciliationEngine = ref.watch(reconciliationEngineProvider);
     final textTheme = Theme.of(context).textTheme;
-    final digitalTotal = evidenceState.resultById.values
+
+    final screenshotInputs = <ParsedScreenshot>[];
+    final exportTotals = <double>[];
+    for (final file in evidenceState.files) {
+      final result = evidenceState.resultById[file.id];
+      if (result == null || result.amounts.isEmpty) continue;
+
+      if (file.source == EvidenceSource.export) {
+        exportTotals.addAll(result.amounts.map((e) => e.amount));
+        continue;
+      }
+
+      screenshotInputs.add(
+        ParsedScreenshot(
+          amounts: result.amounts
+              .map(
+                (amount) => ParsedPaymentAmount(
+                  amount: amount.amount,
+                  confidence: amount.confidence,
+                  trustLabel: amount.trustLabel,
+                ),
+              )
+              .toList(growable: false),
+          rawText: result.amounts.map((e) => e.trustLabel).join(' | '),
+        ),
+      );
+    }
+
+    final reconciliation = reconciliationEngine.synthesize(
+      ReconciliationInput(
+        ocrScreenshots: screenshotInputs,
+        exportTotals: exportTotals,
+        countedCash: cashState.amount,
+        cashTypedByMerchant: cashState.isConfirmed,
+        parsedRecap: voiceState.parsedRecap,
+        tapCountsByItemId: sellingState.countsByMenuItemId,
+      ),
+    );
+
+    final evidenceDigitalTotal = evidenceState.resultById.values
         .expand((result) => result.amounts)
         .fold<double>(0, (sum, amount) => sum + amount.amount);
-    final cashTotal = cashState.amount ?? 0;
+
+    final digitalTotal = evidenceDigitalTotal > 0
+        ? evidenceDigitalTotal
+        : reconciliation.digitalTotal;
+    final cashTotal = reconciliation.countedCash;
     final tappedItems = sellingState.menuItems
         .where((item) => (sellingState.countsByMenuItemId[item.id] ?? 0) > 0)
         .toList(growable: false);
     final estimatedItems = sellingState.totalTaps;
-    final fallbackSales = sellingState.estimatedTotal + cashTotal;
-    final totalSales = (digitalTotal > 0 ? digitalTotal + cashTotal : fallbackSales);
+    final estimatedItemValue = sellingState.estimatedTotal;
+    final totalSales = digitalTotal + cashTotal;
 
     return Scaffold(
       body: Container(
@@ -57,6 +106,22 @@ class DailyLedgerScreen extends ConsumerWidget {
                       cash: 'RM ${cashTotal.toStringAsFixed(2)}',
                       estimatedItems: '$estimatedItems',
                     ),
+                    if (estimatedItemValue > 0) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'Estimated item value: RM ${estimatedItemValue.toStringAsFixed(2)}',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: AppTheme.softWhite.withValues(alpha: 0.72),
+                        ),
+                      ),
+                      if ((estimatedItemValue - totalSales).abs() > 0.01)
+                        Text(
+                          'Note: This estimate is not added into total sales unless confirmed as cash/digital evidence.',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: AppTheme.amber,
+                          ),
+                        ),
+                    ],
                     const SizedBox(height: 20),
                     Text('BUILT FROM', style: textTheme.labelMedium?.copyWith(color: AppTheme.amber)),
                     const SizedBox(height: 10),
@@ -68,20 +133,20 @@ class DailyLedgerScreen extends ConsumerWidget {
                             _SourceChip(
                               label: '${evidenceState.files.length} Screenshot${evidenceState.files.length > 1 ? 's' : ''}',
                               icon: Icons.photo_camera_outlined,
-                              active: digitalTotal > 0,
+                              active: reconciliation.evidenceSources.contains('From screenshot'),
                             ),
                             const SizedBox(width: 8),
                           ],
                           _SourceChip(
                             label: 'Voice Recap',
                             icon: Icons.mic_none_rounded,
-                            active: true,
+                            active: reconciliation.evidenceSources.contains('From voice recap'),
                           ),
                           const SizedBox(width: 8),
                           _SourceChip(
                             label: cashState.isConfirmed ? 'Cash Confirmed' : 'Cash Entry',
                             icon: Icons.payments_outlined,
-                            active: cashState.isConfirmed,
+                            active: reconciliation.cashConfidence == ReconciliationConfidence.merchantConfirmed,
                           ),
                         ],
                       ),
@@ -102,7 +167,7 @@ class DailyLedgerScreen extends ConsumerWidget {
                             name: item.name,
                             qty: '$qty',
                             subtotal: 'RM ${(item.price * qty).toStringAsFixed(2)}',
-                            badge: cashState.isConfirmed ? ConfidenceBadgeType.confirmed : ConfidenceBadgeType.estimated,
+                            badge: _badgeFromReconciliationConfidence(reconciliation.cashConfidence),
                           );
                         },
                       ),
@@ -114,9 +179,32 @@ class DailyLedgerScreen extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(14),
                         border: const Border(left: BorderSide(color: AppTheme.amber, width: 4)),
                       ),
-                      child: Text(
-                        'Fields marked "Estimated" are based on your voice recap. Tap any field to correct it.',
-                        style: textTheme.bodySmall?.copyWith(color: AppTheme.softWhite),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Fields marked "Estimated" are based on your voice recap. Tap any field to correct it.',
+                            style: textTheme.bodySmall?.copyWith(color: AppTheme.softWhite),
+                          ),
+                          if ((estimatedItemValue - totalSales).abs() > 0.01) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'Current total uses confirmed digital + confirmed cash only.',
+                              style: textTheme.bodySmall?.copyWith(color: AppTheme.softWhite.withValues(alpha: 0.85)),
+                            ),
+                          ],
+                          if (reconciliation.uncertaintyNotes.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            for (final note in reconciliation.uncertaintyNotes.take(3))
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Text(
+                                  '- $note',
+                                  style: textTheme.bodySmall?.copyWith(color: AppTheme.softWhite.withValues(alpha: 0.85)),
+                                ),
+                              ),
+                          ],
+                        ],
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -139,12 +227,6 @@ class DailyLedgerScreen extends ConsumerWidget {
                     FilledButton(
                       onPressed: () async {
                         final accountId = ref.read(sessionProvider).accountKey;
-                        if (accountId.isEmpty) {
-                          ScaffoldMessenger.of(context)
-                            ..hideCurrentSnackBar()
-                            ..showSnackBar(const SnackBar(content: Text('Please log in again before saving the ledger.')));
-                          return;
-                        }
 
                         await ref.read(ledgerRepositoryProvider).upsertLedger({
                           'id': DateTime.now().toIso8601String().split('T').first,
@@ -260,5 +342,20 @@ class _LedgerRow extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+ConfidenceBadgeType _badgeFromReconciliationConfidence(ReconciliationConfidence confidence) {
+  switch (confidence) {
+    case ReconciliationConfidence.high:
+      return ConfidenceBadgeType.screenshot;
+    case ReconciliationConfidence.medium:
+      return ConfidenceBadgeType.voice;
+    case ReconciliationConfidence.low:
+      return ConfidenceBadgeType.estimated;
+    case ReconciliationConfidence.merchantConfirmed:
+      return ConfidenceBadgeType.confirmed;
+    case ReconciliationConfidence.needsReview:
+      return ConfidenceBadgeType.needsReview;
   }
 }

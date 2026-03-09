@@ -109,6 +109,7 @@ class VoiceController extends Notifier<VoiceState> {
   final SpeechToText _speech = SpeechToText();
   Timer? _durationTimer;
   bool _sttInitialized = false;
+  String? _preferredLocaleId;
 
   static const maxRecordingDuration = Duration(seconds: 60);
 
@@ -141,8 +142,30 @@ class VoiceController extends Notifier<VoiceState> {
         recordingState: VoiceRecordingState.error,
         errorMessage: 'Speech recognition not available on this device/browser.',
       );
+      return false;
     }
+
+    _preferredLocaleId = await _resolveLocale();
     return _sttInitialized;
+  }
+
+  Future<String?> _resolveLocale() async {
+    try {
+      final locales = await _speech.locales();
+      if (locales.isEmpty) return null;
+
+      final hasMalay = locales.any((l) => l.localeId == 'ms_MY');
+      if (hasMalay) return 'ms_MY';
+
+      final systemLocale = await _speech.systemLocale();
+      if (systemLocale != null && locales.any((l) => l.localeId == systemLocale.localeId)) {
+        return systemLocale.localeId;
+      }
+
+      return locales.first.localeId;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Start recording and recognizing speech
@@ -173,7 +196,7 @@ class VoiceController extends Notifier<VoiceState> {
       onResult: _onSpeechResult,
       listenFor: maxRecordingDuration,
       pauseFor: const Duration(seconds: 4),
-      localeId: 'ms_MY', // Malay (Malaysia) — falls back to device default
+      localeId: _preferredLocaleId,
       onSoundLevelChange: (level) {
         // level is -2 to 10; normalize to 0-1
         final normalized = ((level + 2) / 12).clamp(0.0, 1.0);
@@ -215,6 +238,8 @@ class VoiceController extends Notifier<VoiceState> {
     _stopTimers();
     await _speech.stop();
 
+    await _awaitTranscriptFlush();
+
     // Use whichever transcript we have (final or last partial)
     final transcript = state.transcript ?? state.partialTranscript ?? '';
 
@@ -235,6 +260,20 @@ class VoiceController extends Notifier<VoiceState> {
     );
 
     await _parseTranscript(transcript);
+  }
+
+  Future<void> _awaitTranscriptFlush() async {
+    if ((state.transcript ?? state.partialTranscript ?? '').trim().isNotEmpty) {
+      return;
+    }
+
+    // Some engines deliver final words slightly after stop().
+    for (var i = 0; i < 6; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      if ((state.transcript ?? state.partialTranscript ?? '').trim().isNotEmpty) {
+        return;
+      }
+    }
   }
 
   /// Transcribe and parse (called after stopRecording)

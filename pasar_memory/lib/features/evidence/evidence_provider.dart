@@ -3,9 +3,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../data/repositories/repository_providers.dart';
 import '../auth/session_provider.dart';
@@ -47,11 +45,13 @@ class ExtractedAmount {
   final String id;
   final double amount;
   final String trustLabel;
+  final double confidence;
 
   const ExtractedAmount({
     required this.id,
     required this.amount,
     required this.trustLabel,
+    required this.confidence,
   });
 
 }
@@ -270,6 +270,7 @@ class EvidenceController extends Notifier<EvidenceState> {
     try {
       // Persist raw evidence metadata (type + path) for the day.
       final evidenceRepo = ref.read(evidenceRepositoryProvider);
+      final extractionRepo = ref.read(extractionRepositoryProvider);
       final accountId = ref.read(sessionProvider).accountKey;
       final type = switch (file.source) {
         EvidenceSource.export => 'export',
@@ -279,7 +280,38 @@ class EvidenceController extends Notifier<EvidenceState> {
       await evidenceRepo.saveEvidence(type, file.path ?? file.name, accountId: accountId);
 
       // Real OCR: extract payment amounts from the uploaded image
-      final amounts = await _extractAmountsFromFile(file);
+      final extraction = await _extractAmountsFromFile(file);
+      final amounts = extraction.amounts;
+
+      if (accountId.isNotEmpty) {
+        await extractionRepo.deleteByEvidenceId(file.id, accountId: accountId);
+
+        if (amounts.isEmpty) {
+          await extractionRepo.saveExtraction({
+            'id': '${file.id}_empty',
+            'evidenceId': file.id,
+            'rawText': extraction.rawText,
+            'amount': 0.0,
+            'referenceNumber': '',
+            'confidence': 0.0,
+            'status': 'needs_review',
+            'accountId': accountId,
+          });
+        } else {
+          for (final amount in amounts) {
+            await extractionRepo.saveExtraction({
+              'id': amount.id,
+              'evidenceId': file.id,
+              'rawText': extraction.rawText,
+              'amount': amount.amount,
+              'referenceNumber': '',
+              'confidence': amount.confidence,
+              'status': amount.confidence >= 0.7 ? 'parsed' : 'needs_review',
+              'accountId': accountId,
+            });
+          }
+        }
+      }
 
       final nextResult = Map<String, EvidenceFileResult>.from(state.resultById);
       nextResult[id] = EvidenceFileResult(amounts: amounts);
@@ -290,7 +322,7 @@ class EvidenceController extends Notifier<EvidenceState> {
       state = state.copyWith(statusById: doneStatus, resultById: nextResult);
     } catch (e) {
       final nextResult = Map<String, EvidenceFileResult>.from(state.resultById);
-      nextResult[id] = const EvidenceFileResult(errorMessage: 'Needs clearer image');
+      nextResult[id] = EvidenceFileResult(errorMessage: 'Processing failed: $e');
 
       final errStatus = Map<String, EvidenceProcessingStatus>.from(state.statusById);
       errStatus[id] = EvidenceProcessingStatus.error;
@@ -324,7 +356,12 @@ class EvidenceController extends Notifier<EvidenceState> {
     final nextAmounts = current.amounts
         .map(
           (a) => a.id == amountId
-              ? ExtractedAmount(id: a.id, amount: nextAmount, trustLabel: a.trustLabel)
+              ? ExtractedAmount(
+                  id: a.id,
+                  amount: nextAmount,
+                  trustLabel: a.trustLabel,
+                  confidence: a.confidence,
+                )
               : a,
         )
         .toList(growable: false);
@@ -336,65 +373,34 @@ class EvidenceController extends Notifier<EvidenceState> {
 
   // ── OCR helpers ────────────────────────────────────────────────────────────
 
-  Future<List<ExtractedAmount>> _extractAmountsFromFile(EvidenceIngestedFile file) async {
-    if (kIsWeb) return const <ExtractedAmount>[];
+  Future<({List<ExtractedAmount> amounts, String rawText})> _extractAmountsFromFile(EvidenceIngestedFile file) async {
+    if (kIsWeb) return (amounts: const <ExtractedAmount>[], rawText: '');
 
     final path = file.path;
-    if (path == null || path.trim().isEmpty) return const <ExtractedAmount>[];
+    if (path == null || path.trim().isEmpty) {
+      return (amounts: const <ExtractedAmount>[], rawText: '');
+    }
 
     try {
-      final inputImage = InputImage.fromFilePath(path);
-      final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
-      final recognized = await recognizer.processImage(inputImage);
-      await recognizer.close();
-      return _parseAmountsFromText(recognized.text);
-    } catch (_) {
-      return const <ExtractedAmount>[];
-    }
-  }
-
-  List<ExtractedAmount> _parseAmountsFromText(String rawText) {
-    const uuid = Uuid();
-    final text = rawText.replaceAll('\n', ' ');
-
-    // Priority 1: amounts adjacent to payment keywords
-    final contextPattern = RegExp(
-      r'(?:total|jumlah|amount|bayaran|payment|received|dibayar|transfer|charged|tolak)'
-      r'\s*[:\-]?\s*(?:RM|MYR)?\s*(\d{1,6}(?:[.,]\d{1,2})?)',
-      caseSensitive: false,
-    );
-    // Priority 2: RM / MYR prefixed values
-    final rmPattern = RegExp(
-      r'(?:RM|MYR)\s*(\d{1,6}(?:[.,]\d{1,2})?)',
-      caseSensitive: false,
-    );
-
-    final found = <double, String>{};
-
-    for (final m in contextPattern.allMatches(text)) {
-      final raw = (m.group(1) ?? '').replaceAll(',', '.');
-      final v = double.tryParse(raw);
-      if (v != null && v >= 0.10) found[v] = 'Total amount';
-    }
-    for (final m in rmPattern.allMatches(text)) {
-      final raw = (m.group(1) ?? '').replaceAll(',', '.');
-      final v = double.tryParse(raw);
-      if (v != null && v >= 0.10 && !found.containsKey(v)) {
-        found[v] = 'Payment detected';
+      final ocrService = ref.read(ocrServiceProvider);
+      final result = await ocrService.extractFromImagePath(path);
+      final parsedAmounts = <ExtractedAmount>[];
+      for (var i = 0; i < result.parsed.amounts.length && i < 5; i++) {
+        final amount = result.parsed.amounts[i];
+        parsedAmounts.add(
+          ExtractedAmount(
+            id: '${file.id}_$i',
+            amount: amount.amount,
+            trustLabel: amount.trustLabel,
+            confidence: amount.confidence,
+          ),
+        );
       }
-    }
 
-    // Sort largest-first (the overall total is usually the biggest number)
-    final entries = found.entries.toList()..sort((a, b) => b.key.compareTo(a.key));
-    final result = <ExtractedAmount>[];
-    for (var i = 0; i < entries.length && i < 5; i++) {
-      result.add(ExtractedAmount(
-        id: uuid.v4(),
-        amount: entries[i].key,
-        trustLabel: entries[i].value,
-      ));
+      return (amounts: parsedAmounts, rawText: result.rawText);
+    } catch (_) {
+      return (amounts: const <ExtractedAmount>[], rawText: '');
     }
-    return result;
   }
 }
 
