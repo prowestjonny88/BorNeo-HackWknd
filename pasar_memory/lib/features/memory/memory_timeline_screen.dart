@@ -1,8 +1,12 @@
+import 'dart:io' show File;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/repositories/repository_providers.dart';
+import '../auth/session_provider.dart';
 import 'history_provider.dart';
 
 import '../../shared/theme/app_theme.dart';
@@ -166,19 +170,6 @@ class MemoryTimelineScreen extends ConsumerWidget {
                         padding: EdgeInsets.only(top: 32),
                         child: Center(child: CircularProgressIndicator()),
                       )
-                    // Web: local storage not available
-                    else if (kIsWeb && historyState.filteredEntries.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Text(
-                          'History is saved locally and is only available on the mobile app. Use the Android or iOS version to view past day summaries.',
-                          style: textTheme.bodyMedium?.copyWith(color: AppTheme.softWhite.withValues(alpha: 0.72)),
-                        ),
-                      )
                     // Empty state
                     else if (historyState.filteredEntries.isEmpty)
                       Text(
@@ -208,10 +199,8 @@ class MemoryTimelineScreen extends ConsumerWidget {
                                 padding: const EdgeInsets.only(bottom: 10),
                                 child: _DayHistoryCard(
                                   entry: entry,
-                                  onTap: () {
-                                    historyController.selectEntry(entry);
-                                    context.push('/ledger?date=${entry.date.toIso8601String().split('T').first}');
-                                  },
+                                  onEdit: () => _showEditSheet(context, entry),
+                                  onDelete: () => _showDeleteDialog(context, ref, entry),
                                 ),
                               ),
                             );
@@ -230,6 +219,48 @@ class MemoryTimelineScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Opens the edit bottom sheet for a ledger entry.
+void _showEditSheet(BuildContext context, HistoryDayEntry entry) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: const Color(0xFF111827), // AppTheme.deepForest
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => _EditLedgerSheet(entry: entry),
+  );
+}
+
+/// Shows a delete-confirmation dialog and, if confirmed, deletes the entry.
+Future<void> _showDeleteDialog(
+  BuildContext context,
+  WidgetRef ref,
+  HistoryDayEntry entry,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1E293B),
+      title: const Text('Delete record?', style: TextStyle(color: Color(0xFFF8FBFF))),
+      content: Text(
+        'Are you sure you want to delete the record for ${entry.dateFormatted}?\n\nThis action cannot be undone.',
+        style: const TextStyle(color: Color(0xAAF8FBFF)),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFFF7A59)),
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  await ref.read(historyProvider.notifier).deleteEntry(entry.id);
 }
 
 class _FilterChip extends StatelessWidget {
@@ -263,107 +294,490 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _DayHistoryCard extends StatelessWidget {
-  const _DayHistoryCard({required this.entry, this.onTap});
+  const _DayHistoryCard({
+    required this.entry,
+    this.onEdit,
+    this.onDelete,
+  });
 
   final HistoryDayEntry entry;
-  final VoidCallback? onTap;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     final accent = entry.isConfirmed ? AppTheme.jade : AppTheme.coral;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
         ),
-        child: Row(
+        child: Column(
           children: [
-            Container(
-              width: 4, 
-              height: 48,
-              decoration: BoxDecoration(
-                color: accent, 
-                borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.2), 
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                entry.dateShort, 
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: accent, 
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
+            // ── Main info row ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+              child: Row(
                 children: [
-                  Text(
-                    'RM ${entry.totalSales.toStringAsFixed(2)}', 
-                    style: AppTheme.mono(size: 18, color: AppTheme.softWhite),
+                  Container(
+                    width: 4,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                    ),
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        'Total Sales', 
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppTheme.softWhite.withValues(alpha: 0.6),
-                        ),
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      entry.dateShort,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: accent,
+                        fontWeight: FontWeight.w700,
                       ),
-                      if (entry.isConfirmed) ...[
-                        const SizedBox(width: 8),
-                        Icon(
-                          Icons.check_circle_outline_rounded,
-                          size: 14,
-                          color: AppTheme.jade,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'RM ${entry.totalSales.toStringAsFixed(2)}',
+                          style: AppTheme.mono(size: 18, color: AppTheme.softWhite),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Text(
+                              'Total Sales',
+                              style: textTheme.bodySmall?.copyWith(
+                                color: AppTheme.softWhite.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            if (entry.isConfirmed) ...[
+                              const SizedBox(width: 8),
+                              Icon(
+                                Icons.check_circle_outline_rounded,
+                                size: 14,
+                                color: AppTheme.jade,
+                              ),
+                            ],
+                          ],
                         ),
                       ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        'RM ${entry.cashTotal.toStringAsFixed(0)}',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: AppTheme.softWhite.withValues(alpha: 0.7),
+                        ),
+                      ),
+                      Text(
+                        'Cash',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: AppTheme.softWhite.withValues(alpha: 0.5),
+                        ),
+                      ),
                     ],
                   ),
+                  const SizedBox(width: 8),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
+
+            // ── Action row ─────────────────────────────────────────────────
+            Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
+            Row(
               children: [
-                Text(
-                  'RM ${entry.cashTotal.toStringAsFixed(0)}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppTheme.softWhite.withValues(alpha: 0.7),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined, size: 14),
+                    label: const Text('Edit'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.amber,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      textStyle: textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
+                    ),
                   ),
                 ),
-                Text(
-                  'Cash',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: AppTheme.softWhite.withValues(alpha: 0.5),
+                Container(width: 1, height: 28, color: Colors.white.withValues(alpha: 0.1)),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline_rounded, size: 14),
+                    label: const Text('Delete'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.coral,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      textStyle: textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(width: 8),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: AppTheme.softWhite.withValues(alpha: 0.5),
-            ),
-            const SizedBox(width: 8),
           ],
         ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit ledger bottom sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EditLedgerSheet extends ConsumerStatefulWidget {
+  const _EditLedgerSheet({required this.entry});
+  final HistoryDayEntry entry;
+
+  @override
+  ConsumerState<_EditLedgerSheet> createState() => _EditLedgerSheetState();
+}
+
+class _EditLedgerSheetState extends ConsumerState<_EditLedgerSheet> {
+  late final TextEditingController _totalCtrl;
+  late final TextEditingController _digitalCtrl;
+  late final TextEditingController _cashCtrl;
+  late final TextEditingController _notesCtrl;
+  late bool _isConfirmed;
+
+  List<Map<String, dynamic>> _evidenceFiles = [];
+  bool _loadingEvidence = false;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.entry;
+    _totalCtrl = TextEditingController(text: e.totalSales.toStringAsFixed(2));
+    _digitalCtrl = TextEditingController(text: e.digitalTotal.toStringAsFixed(2));
+    _cashCtrl = TextEditingController(text: e.cashTotal.toStringAsFixed(2));
+    _notesCtrl = TextEditingController(text: e.notes ?? '');
+    _isConfirmed = e.isConfirmed;
+    _loadEvidence();
+  }
+
+  @override
+  void dispose() {
+    _totalCtrl.dispose();
+    _digitalCtrl.dispose();
+    _cashCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadEvidence() async {
+    if (kIsWeb) return; // Evidence file paths are not usable on web
+    setState(() => _loadingEvidence = true);
+    try {
+      final accountId = ref.read(sessionProvider).accountKey;
+      final evidenceRepo = ref.read(evidenceRepositoryProvider);
+      final files = await evidenceRepo.getEvidenceByDate(
+        widget.entry.date,
+        accountId: accountId,
+      );
+      if (mounted) {
+        setState(() {
+          _evidenceFiles = files
+              .where((f) => f['type'] == 'screenshot')
+              .toList();
+          _loadingEvidence = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingEvidence = false);
+    }
+  }
+
+  Future<void> _onSave() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: const Text(
+          'Save changes?',
+          style: TextStyle(color: Color(0xFFF8FBFF)),
+        ),
+        content: const Text(
+          'Are you sure you want to save these changes?\n\nThis action cannot be undone.',
+          style: TextStyle(color: Color(0xAAF8FBFF)),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFFB15E), // amber
+              foregroundColor: const Color(0xFF172033), // charcoal
+            ),
+            child: const Text('Save changes'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _saving = true);
+    final notesText = _notesCtrl.text.trim();
+    final updated = widget.entry.copyWith(
+      totalSales: double.tryParse(_totalCtrl.text) ?? widget.entry.totalSales,
+      digitalTotal: double.tryParse(_digitalCtrl.text) ?? widget.entry.digitalTotal,
+      cashTotal: double.tryParse(_cashCtrl.text) ?? widget.entry.cashTotal,
+      notes: notesText.isEmpty ? null : notesText,
+      clearNotes: notesText.isEmpty,
+      isConfirmed: _isConfirmed,
+    );
+
+    await ref.read(historyProvider.notifier).updateEntry(updated);
+    if (mounted) Navigator.pop(context);
+  }
+
+  InputDecoration _fieldDecoration({String? hint}) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: const Color(0xFFF8FBFF).withValues(alpha: 0.3)),
+      filled: true,
+      fillColor: Colors.white.withValues(alpha: 0.07),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFFFB15E), width: 1.5),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final labelStyle = textTheme.labelSmall?.copyWith(
+      color: const Color(0xFFF8FBFF).withValues(alpha: 0.5),
+      letterSpacing: 0.8,
+    );
+    final fieldText = textTheme.bodyMedium?.copyWith(color: AppTheme.softWhite);
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.88,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (_, scrollCtrl) => Column(
+        children: [
+          // ── Drag handle ──────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 4),
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          // ── Header ───────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            child: Row(
+              children: [
+                Text(
+                  'Edit Record',
+                  style: textTheme.titleLarge?.copyWith(color: AppTheme.softWhite, fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.amber.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    widget.entry.dateFormatted,
+                    style: textTheme.labelMedium?.copyWith(color: AppTheme.amber, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
+
+          // ── Scrollable body ───────────────────────────────────────────────
+          Expanded(
+            child: ListView(
+              controller: scrollCtrl,
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+              children: [
+
+                // ── Screenshots ────────────────────────────────────────────
+                if (!kIsWeb) ...[
+                  Text('SCREENSHOTS', style: labelStyle),
+                  const SizedBox(height: 8),
+                  if (_loadingEvidence)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_evidenceFiles.isEmpty)
+                    Text(
+                      'No screenshots attached to this day.',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: AppTheme.softWhite.withValues(alpha: 0.45),
+                      ),
+                    )
+                  else
+                    SizedBox(
+                      height: 140,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _evidenceFiles.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (_, i) {
+                          final path = _evidenceFiles[i]['filePath'] as String? ?? '';
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.file(
+                              File(path),
+                              width: 120,
+                              height: 140,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                width: 120,
+                                height: 140,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(
+                                  Icons.image_not_supported_outlined,
+                                  color: Colors.white38,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  const SizedBox(height: 24),
+                ],
+
+                // ── Total Sales ────────────────────────────────────────────
+                Text('TOTAL SALES (RM)', style: labelStyle),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _totalCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: fieldText,
+                  decoration: _fieldDecoration(hint: '0.00'),
+                ),
+                const SizedBox(height: 16),
+
+                // ── Digital Total ──────────────────────────────────────────
+                Text('DIGITAL TOTAL (RM)', style: labelStyle),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _digitalCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: fieldText,
+                  decoration: _fieldDecoration(hint: '0.00'),
+                ),
+                const SizedBox(height: 16),
+
+                // ── Cash Estimate ──────────────────────────────────────────
+                Text('CASH ESTIMATE (RM)', style: labelStyle),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _cashCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: fieldText,
+                  decoration: _fieldDecoration(hint: '0.00'),
+                ),
+                const SizedBox(height: 16),
+
+                // ── Notes ──────────────────────────────────────────────────
+                Text('NOTES', style: labelStyle),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _notesCtrl,
+                  maxLines: 3,
+                  style: fieldText,
+                  decoration: _fieldDecoration(hint: 'Optional notes…'),
+                ),
+                const SizedBox(height: 20),
+
+                // ── Confirmed toggle ───────────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Mark as Confirmed',
+                          style: textTheme.bodyMedium?.copyWith(color: AppTheme.softWhite),
+                        ),
+                      ),
+                      Switch(
+                        value: _isConfirmed,
+                        onChanged: (v) => setState(() => _isConfirmed = v),
+                        activeColor: AppTheme.jade,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 28),
+
+                // ── Save button ────────────────────────────────────────────
+                FilledButton(
+                  onPressed: _saving ? null : _onSave,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.amber,
+                    foregroundColor: AppTheme.charcoal,
+                    disabledBackgroundColor: AppTheme.amber.withValues(alpha: 0.5),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF172033)),
+                        )
+                      : Text(
+                          'Save Changes',
+                          style: textTheme.labelLarge?.copyWith(
+                            color: AppTheme.charcoal,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

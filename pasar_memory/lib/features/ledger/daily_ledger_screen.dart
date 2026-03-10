@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../data/repositories/repository_providers.dart';
 import '../../services/ocr/screenshot_parser.dart';
@@ -232,7 +233,7 @@ class DailyLedgerScreen extends ConsumerWidget {
                         final accountId = ref.read(sessionProvider).accountKey;
 
                         await ref.read(ledgerRepositoryProvider).upsertLedger({
-                          'id': DateTime.now().toIso8601String().split('T').first,
+                          'id': const Uuid().v4(),
                           'date': DateTime.now().toIso8601String().split('T').first,
                           'totalSales': totalSales,
                           'digitalTotal': digitalTotal,

@@ -57,7 +57,7 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
       }
     });
     // Recompute cash whenever voice item quantities are edited
-    _reviewSubscription = ref.listenManual<RecapReviewState>(recapReviewProvider, (_, __) {
+    _reviewSubscription = ref.listenManual<RecapReviewState>(recapReviewProvider, (_, _) {
       _recomputeCashIfNeeded();
     });
   }

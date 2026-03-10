@@ -38,6 +38,29 @@ class HistoryDayEntry {
     );
   }
 
+  HistoryDayEntry copyWith({
+    String? id,
+    DateTime? date,
+    double? totalSales,
+    double? digitalTotal,
+    double? cashTotal,
+    bool? isConfirmed,
+    int? itemCount,
+    String? notes,
+    bool clearNotes = false,
+  }) {
+    return HistoryDayEntry(
+      id: id ?? this.id,
+      date: date ?? this.date,
+      totalSales: totalSales ?? this.totalSales,
+      digitalTotal: digitalTotal ?? this.digitalTotal,
+      cashTotal: cashTotal ?? this.cashTotal,
+      isConfirmed: isConfirmed ?? this.isConfirmed,
+      itemCount: itemCount ?? this.itemCount,
+      notes: clearNotes ? null : (notes ?? this.notes),
+    );
+  }
+
   String get dateFormatted {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return '${date.day} ${months[date.month - 1]}';
@@ -165,6 +188,47 @@ class HistoryController extends Notifier<HistoryState> {
   /// Clear selection
   void clearSelection() {
     state = state.copyWith(clearSelected: true);
+  }
+
+  /// Delete a ledger entry by id
+  Future<void> deleteEntry(String id) async {
+    try {
+      final accountId = ref.read(sessionProvider).accountKey;
+      final ledgerRepo = ref.read(ledgerRepositoryProvider);
+      await ledgerRepo.deleteLedger(id, accountId: accountId);
+      state = state.copyWith(
+        entries: state.entries.where((e) => e.id != id).toList(),
+      );
+    } catch (e) {
+      state = state.copyWith(errorMessage: 'Failed to delete: $e');
+    }
+  }
+
+  /// Update an existing ledger entry
+  Future<void> updateEntry(HistoryDayEntry updated) async {
+    try {
+      final accountId = ref.read(sessionProvider).accountKey;
+      final ledgerRepo = ref.read(ledgerRepositoryProvider);
+      await ledgerRepo.updateLedger(
+        updated.id,
+        {
+          'date': updated.date.toIso8601String().split('T')[0],
+          'totalSales': updated.totalSales,
+          'digitalTotal': updated.digitalTotal,
+          'cashEstimate': updated.cashTotal,
+          'unresolvedCount': 0,
+          'isConfirmed': updated.isConfirmed ? 1 : 0,
+        },
+        accountId: accountId,
+      );
+      state = state.copyWith(
+        entries: state.entries
+            .map((e) => e.id == updated.id ? updated : e)
+            .toList(),
+      );
+    } catch (e) {
+      state = state.copyWith(errorMessage: 'Failed to save changes: $e');
+    }
   }
 }
 
