@@ -384,17 +384,10 @@ class MenuAwareParser {
     final beforeValue = _extractLastSmallNumber(before);
     final afterValue = _extractFirstSmallNumber(after);
 
-    // Targeted before-window check: "cash 32 nasi" pattern.
-    // _isNearCashKeyword has a value<50 guard that misses small cash amounts.
-    // Here we specifically catch cash/tunai/duit DIRECTLY followed by the number.
-    if (beforeValue != null) {
-      final cashDirectlyBeforeNumber = RegExp(
-        r'(?:cash|tunai|wang|duit)\s{0,3}' + RegExp.escape(beforeValue.toString()),
-        caseSensitive: false,
-      );
-      if (cashDirectlyBeforeNumber.hasMatch(before)) {
-        return afterValue;
-      }
+    // If the number in the before-window is the cash amount itself, reject it.
+    // Works for both digit ("cash 32 nasi") and word ("cash six nasi") forms.
+    if (beforeValue != null && _isCashFollowedByValue(before, beforeValue)) {
+      return afterValue;
     }
 
     // Check if extracted numbers are near cash keywords - if so, reject them
@@ -608,17 +601,71 @@ class MenuAwareParser {
   }
 
   /// Returns the first valid amount in [text] (left-to-right).
+  /// Competes digit-based amounts (handles decimals like 6.50) against
+  /// word numbers (e.g. "five") and returns whichever appears earliest.
   double? _extractFirstMoneyAmount(String text) {
+    // Earliest digit/decimal match via _amountPattern
+    int? digitStart;
+    double? digitValue;
     for (final match in _amountPattern.allMatches(text)) {
       final parsed = double.tryParse((match.group(1) ?? '').trim());
-      if (parsed != null && parsed > 0) return parsed;
+      if (parsed != null && parsed > 0) {
+        digitStart = match.start;
+        digitValue = parsed;
+        break;
+      }
     }
+
+    // Earliest word-number token
+    int? wordStart;
+    double? wordValue;
     final wordTokens = _wordTokenPattern.allMatches(text).toList(growable: false);
     for (var i = 0; i < wordTokens.length; i++) {
       final parsed = _parseNumberishTokens(wordTokens, i);
-      if (parsed != null && parsed > 0) return parsed.toDouble();
+      if (parsed != null && parsed > 0) {
+        wordStart = wordTokens[i].start;
+        wordValue = parsed.toDouble();
+        break;
+      }
     }
-    return null;
+
+    if (digitStart == null && wordStart == null) return null;
+    if (digitStart == null) return wordValue;
+    if (wordStart == null) return digitValue;
+    // Both found: whichever starts earlier in the text wins
+    return digitStart <= wordStart ? digitValue : wordValue;
+  }
+
+  /// Returns true when [before] contains a cash keyword immediately
+  /// followed by [value] (as a digit or word number), meaning this
+  /// number is the cash amount and should not be used as an item quantity.
+  /// Also rejects the fractional part of a decimal cash (e.g. 50 from 6.50).
+  bool _isCashFollowedByValue(String before, int value) {
+    for (final cashMatch in _cashKeywords.allMatches(before)) {
+      final afterCash = before.substring(cashMatch.end);
+      // Try decimal-aware pattern first so "6.50" is treated as one amount.
+      final amountMatch = _amountPattern.firstMatch(afterCash.trimLeft());
+      if (amountMatch != null) {
+        final amountStr = (amountMatch.group(1) ?? '').trim();
+        final parsed = double.tryParse(amountStr);
+        if (parsed != null && parsed > 0) {
+          // Reject if value is the integer part (6 from 6.50)
+          if (parsed.toInt() == value) return true;
+          // Reject if value is the fractional digit sequence (50 from 6.50)
+          final dotIdx = amountStr.indexOf('.');
+          if (dotIdx >= 0) {
+            final fracPart = int.tryParse(amountStr.substring(dotIdx + 1));
+            if (fracPart == value) return true;
+          }
+          // Reject if value matches the rounded whole amount
+          if (parsed.round() == value) return true;
+        }
+      }
+      // Word number fallback (e.g. "cash five")
+      final firstVal = _extractFirstSmallNumber(afterCash);
+      if (firstVal == value) return true;
+    }
+    return false;
   }
 
   /// Returns the last valid amount in [text] (right-to-left).

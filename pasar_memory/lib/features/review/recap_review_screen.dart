@@ -30,12 +30,8 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
   void initState() {
     super.initState();
     final recap = ref.read(recapDraftProvider);
-    final cashState = ref.read(cashEntryProvider);
     final voiceState = ref.read(voiceProvider);
-    final initialCash = cashState.amount ??
-      voiceState.parsedRecap?.cashMention?.amount ??
-      recap.cashSuggestion ??
-      0.0;
+    final initialCash = voiceState.parsedRecap?.cashMention?.amount ?? 0.0;
     _notesController = TextEditingController(text: recap.notes);
     _cashController = TextEditingController(text: initialCash.toStringAsFixed(2));
     _recapSubscription = ref.listenManual<RecapDraftState>(recapDraftProvider, (prev, next) {
@@ -76,12 +72,11 @@ class _RecapReviewScreenState extends ConsumerState<RecapReviewScreen> {
     final cashState = ref.watch(cashEntryProvider);
     final textTheme = Theme.of(context).textTheme;
 
-    final suggestedCash = cashState.amount ??
-        voiceState.parsedRecap?.cashMention?.amount ??
-        recap.cashSuggestion ??
-        0.0;
-    if (_cashController.text.trim().isEmpty) {
-      _cashController.text = suggestedCash.toStringAsFixed(2);
+    final suggestedCash = voiceState.parsedRecap?.cashMention?.amount ?? 0.0;
+    // Keep the cash field in sync whenever the parsed recap changes.
+    final newCashText = suggestedCash.toStringAsFixed(2);
+    if (_cashController.text.trim().isEmpty || _cashController.text != newCashText) {
+      _cashController.text = newCashText;
     }
     
     // Get items from selling state (tapped) OR from voice parsed recap
