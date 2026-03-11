@@ -238,6 +238,19 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
                               label: const Text('Back to Home', style: TextStyle(fontSize: 16)),
                             ),
                           ),
+                          if (isOnboarding) ...[
+                            const SizedBox(height: 8),
+                            TextButton(
+                              onPressed: state.isSaving
+                                  ? null
+                                  : () async {
+                                await ref.read(sessionProvider.notifier).completeMenuSetup();
+                                if (!context.mounted) return;
+                                context.go('/');
+                              },
+                              child: const Text('Skip for now. I\'ll set up later'),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -312,36 +325,7 @@ class _MenuSetupScreenState extends ConsumerState<MenuSetupScreen> {
                       ),
                     ),
                   const SizedBox(height: 24),
-                  if (isOnboarding)
-                    FilledButton(
-                      onPressed: state.isSaving
-                          ? null
-                          : () async {
-                        await ref.read(sessionProvider.notifier).completeMenuSetup();
-                        if (!context.mounted) return;
-                        context.go('/');
-                      },
-                      child: state.isSaving
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Save Menu & Go to Dashboard ->'),
-                    ),
-                  if (isOnboarding) ...[
-                    const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: state.isSaving
-                          ? null
-                          : () async {
-                        await ref.read(sessionProvider.notifier).completeMenuSetup();
-                        if (!context.mounted) return;
-                        context.go('/');
-                      },
-                      child: const Text('Skip for now, I\'ll set up later'),
-                    ),
-                  ],
+
                   Text(
                     'Aliases help match messy receipts or shorthand names later.',
                     style: Theme.of(context)
